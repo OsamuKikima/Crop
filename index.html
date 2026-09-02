@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ワークショップ記録帳 Crop — Firebase試作版</title>
+<style>
+  :root{
+    --ink:#20242b; --ink-soft:#585f6b; --ink-faint:#8b8f99;
+    --surface:#fffefb; --surface-2:#f4efe3; --line:#e3dac2; --line-strong:#cfc4a4;
+    --accent:#1e6fea; --accent-soft:#e8f0fe; --record:#e8482e; --record-soft:#fdeae6; --record-strong:#b5321b;
+    --font-mono:'JetBrains Mono',ui-monospace,'SF Mono',monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--surface-2); color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,'Hiragino Kaku Gothic ProN','Yu Gothic',sans-serif; font-size:15px; line-height:1.6;}
+  header{background:var(--surface); border-bottom:1px solid var(--line); padding:.9rem 1.2rem; display:flex; align-items:center; justify-content:space-between; position:sticky; top:0; z-index:5;}
+  header .brand{font-weight:800; font-size:1rem;}
+  header .sub{font-size:.68rem; letter-spacing:.14em; color:var(--ink-faint);}
+  #mode-switch-btn{background:var(--surface); border:1px solid var(--line-strong); border-radius:999px; padding:.4rem .9rem; font-size:.78rem; font-weight:700; cursor:pointer; color:var(--ink);}
+  main{max-width:560px; margin:0 auto; padding:1.2rem 1rem 3rem;}
+  .block{background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:1.1rem 1.2rem; margin-bottom:1rem;}
+  .field{display:flex; flex-direction:column; gap:.3rem; margin-bottom:.8rem;}
+  .field label{font-size:.78rem; font-weight:700; color:var(--ink-soft);}
+  .field input, .field textarea{border:1px solid var(--line); border-radius:8px; padding:.55rem .7rem; font-size:.9rem; background:var(--surface); color:var(--ink); font-family:inherit;}
+  .hint{font-size:.78rem; color:var(--ink-faint); margin:.2rem 0 .6rem;}
+  .primary-btn{background:var(--accent); color:#fff; border:none; border-radius:10px; padding:.7rem 1rem; font-size:.9rem; font-weight:700; cursor:pointer;}
+  .btn-sm{background:var(--surface); border:1px solid var(--line-strong); border-radius:8px; padding:.4rem .8rem; font-size:.8rem; font-weight:700; cursor:pointer; color:var(--ink);}
+  .btn-sm.primary{background:var(--accent); color:#fff; border-color:var(--accent);}
+  .form-error{color:var(--record-strong); font-size:.8rem; margin:.3rem 0 .7rem;}
+  .link-btn{background:none; border:none; color:var(--accent); font-size:.8rem; font-weight:600; cursor:pointer; text-decoration:underline; padding:.2rem 0;}
+  .reset-code-box{background:var(--record-soft); border:1px dashed var(--record-strong); border-radius:12px; padding:1rem; text-align:center; margin:.8rem 0;}
+  .reset-code-box .code{font-family:var(--font-mono); font-size:1.3rem; font-weight:800; letter-spacing:.12em; color:var(--record-strong); margin:.3rem 0;}
+  .reset-code-warn{color:var(--record-strong); font-size:.76rem; font-weight:700;}
+  .record-card{border:1px solid var(--line); border-radius:10px; padding:.7rem .9rem; margin-bottom:.6rem; background:var(--surface);}
+  .record-card .name{font-weight:700; font-size:.85rem;}
+  .record-card .time{font-size:.68rem; color:var(--ink-faint); font-family:var(--font-mono);}
+  .record-card .msg{font-size:.85rem; margin-top:.3rem; white-space:pre-wrap;}
+  .status-line{font-size:.78rem; color:var(--ink-faint); margin-bottom:.6rem;}
+  .status-line.err{color:var(--record-strong); font-weight:700;}
+  .empty{text-align:center; color:var(--ink-faint); padding:1.5rem 0; font-size:.85rem;}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="brand" id="brand-mark">ワークショップ記録帳 Crop（Firebase試作版）</div>
+    <div class="sub" id="brand-sub">MANAGER</div>
+  </div>
+  <button id="mode-switch-btn">参加者はこちら</button>
+</header>
+
+<main id="app-root">
+  <div id="db-warn-slot"></div>
+  <div id="view-root"></div>
+</main>
+
+<!--
+  ============================================================
+  このファイルは「小さな試作」です。元の gijinote-unified.html の
+  全機能を移植したものではなく、次の3点だけを Firebase の上で
+  実際に動かして確認するためのものです。
+
+    1) 管理者アカウントの登録・ログイン・パスワード再設定
+       （元アプリの managerAccounts コレクションのロジックをそのまま移植）
+    2) 参加者が記録を送信する
+    3) 送信すると管理者画面にリアルタイムで反映される（onSnapshot）
+
+  これが問題なく動けば、同じ書き方のまま元アプリの残りの機能
+  （グループ、問い、ふりかえり、CSV/PPTX出力など）を同じ仕組みの上に
+  移植していくだけで良い、ということが確認できます。
+
+  セットアップ手順は同梱の「セットアップ手順書」を参照してください。
+  ============================================================
+-->
+
+<!-- 1) Firebase SDK（compatバージョン。<script>タグでそのまま使えます） -->
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+
+<script>
+"use strict";
+
+/* ============================================================
+   2) ここをあなた自身のFirebaseプロジェクトの値に書き換えてください
+   （Firebaseコンソール → プロジェクトの設定 → 全般 → マイアプリ、
+   に表示される firebaseConfig をそのままコピーしてきます）
+   ============================================================ */
+var firebaseConfig = {
+  apiKey: "AIzaSyBpegGmC8JH7svjZlhgGWxNoyIjTmIZzp0",
+  authDomain: "crop-27ef5.firebaseapp.com",
+  projectId: "crop-27ef5",
+  storageBucket: "crop-27ef5.firebasestorage.app",
+  messagingSenderId: "787923806496",
+  appId: "1:787923806496:web:aa8faf6b596ad014448f45"
+};
+
+var usingDb = false;
+var dbApi = null;
+try{
+  firebase.initializeApp(firebaseConfig);
+  // ここがポイント：Firestoreのインスタンスをそのまま dbApi として使えます。
+  // 元アプリが呼んでいた dbApi.collection(path) / dbApi.doc(path) は、
+  // Firestoreの compat SDK が最初から同じ形で提供してくれているので、
+  // 変換コード（アダプター）はほぼ不要です。
+  dbApi = firebase.firestore();
+  usingDb = true;
+}catch(e){
+  console.error('Firebase初期化に失敗しました。firebaseConfigの値を確認してください。', e);
+  usingDb = false;
+}
+
+/* ============================================================
+   3) downloads機能の代わり（ブラウザ標準のダウンロードに置き換え）
+   元アプリの downloadsApi.save({filename, data}) と同じ形で使えるように
+   しています。data は文字列（CSVなど）でもBlob（写真など）でも可。
+   ============================================================ */
+var downloadsApi = {
+  save: function(opts){
+    return new Promise(function(resolve){
+      var filename = opts.filename || 'download.txt';
+      var data = opts.data;
+      var blob = (data instanceof Blob) ? data : new Blob([data], {type:'text/plain'});
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url; a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
+      resolve();
+    });
+  }
+};
+
+/* ============================================================
+   以下、元アプリ(gijinote-unified.html)の該当ロジックをほぼそのまま
+   使っています（ハッシュ化の方式・データの持ち方は完全に同一）。
+   ============================================================ */
+function esc(s){
+  return String(s==null?'':s).replace(/[&<>"']/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+function addDoc(path, data){ return dbApi.collection(path).add(data); }
+
+var MANAGER_ACCOUNT_KEY = 'gijinote_manager_account_id';
+function getStoredManagerAccountId(){ try{ return localStorage.getItem(MANAGER_ACCOUNT_KEY); }catch(e){ return null; } }
+function setStoredManagerAccountId(id){ try{ localStorage.setItem(MANAGER_ACCOUNT_KEY, id); }catch(e){} }
+function clearStoredManagerAccountId(){ try{ localStorage.removeItem(MANAGER_ACCOUNT_KEY); }catch(e){} }
+
+function randomHex(nBytes){
+  var arr = new Uint8Array(nBytes);
+  (window.crypto || window.msCrypto).getRandomValues(arr);
+  var out = '';
+  for (var i=0;i<arr.length;i++) out += arr[i].toString(16).padStart(2,'0');
+  return out;
+}
+async function sha256Hex(str){
+  var enc = new TextEncoder().encode(str);
+  var buf = await crypto.subtle.digest('SHA-256', enc);
+  var arr = Array.from(new Uint8Array(buf));
+  return arr.map(function(b){ return b.toString(16).padStart(2,'0'); }).join('');
+}
+async function hashSecret(value, salt){ return await sha256Hex(salt + ':' + value); }
+function normalizeEmail(s){ return String(s||'').trim().toLowerCase(); }
+var RESET_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+function randomResetCode(){
+  var s = '';
+  for (var i=0;i<8;i++) s += RESET_CODE_ALPHABET[Math.floor(Math.random()*RESET_CODE_ALPHABET.length)];
+  return s.slice(0,4) + '-' + s.slice(4);
+}
+function normalizeResetCode(s){ return String(s||'').trim().toUpperCase().replace(/[^A-Z0-9]/g,''); }
+function isValidEmailFormat(s){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(s||'').trim()); }
+
+async function findManagerAccountByEmail(emailLower){
+  var qs = await dbApi.collection('managerAccounts').limit(500).get();
+  var found = null;
+  qs.forEach(function(d){
+    var data = d.data() || {};
+    if (data.emailLower === emailLower) found = Object.assign({}, data, {id: d.id});
+  });
+  return found;
+}
+async function createManagerAccount(email, password, createdBy){
+  var emailLower = normalizeEmail(email);
+  var passwordSalt = randomHex(16);
+  var passwordHash = await hashSecret(password, passwordSalt);
+  var resetCode = randomResetCode();
+  var resetCodeSalt = randomHex(16);
+  var resetCodeHash = await hashSecret(normalizeResetCode(resetCode), resetCodeSalt);
+  var doc = {
+    email: String(email).trim(), emailLower: emailLower,
+    passwordSalt: passwordSalt, passwordHash: passwordHash,
+    resetCodeSalt: resetCodeSalt, resetCodeHash: resetCodeHash,
+    createdAt: new Date().toISOString(), createdBy: createdBy || null
+  };
+  var ref = await addDoc('managerAccounts', doc);
+  return {id: ref.id, resetCode: resetCode, email: doc.email};
+}
+async function attemptManagerLogin(email, password){
+  var acct = await findManagerAccountByEmail(normalizeEmail(email));
+  if (!acct) return {ok:false, error:'メールアドレスまたはパスワードが正しくありません。'};
+  var hash = await hashSecret(password, acct.passwordSalt);
+  if (hash !== acct.passwordHash) return {ok:false, error:'メールアドレスまたはパスワードが正しくありません。'};
+  return {ok:true, account:{id:acct.id, email:acct.email}};
+}
+async function attemptManagerReset(email, code, newPassword){
+  var acct = await findManagerAccountByEmail(normalizeEmail(email));
+  if (!acct) return {ok:false, error:'メールアドレスまたは再設定コードが正しくありません。'};
+  var codeHash = await hashSecret(normalizeResetCode(code), acct.resetCodeSalt);
+  if (codeHash !== acct.resetCodeHash) return {ok:false, error:'メールアドレスまたは再設定コードが正しくありません。'};
+  var passwordSalt = randomHex(16);
+  var passwordHash = await hashSecret(newPassword, passwordSalt);
+  var newResetCode = randomResetCode();
+  var newResetCodeSalt = randomHex(16);
+  var newResetCodeHash = await hashSecret(normalizeResetCode(newResetCode), newResetCodeSalt);
+  await dbApi.doc('managerAccounts/'+acct.id).update({
+    passwordSalt: passwordSalt, passwordHash: passwordHash,
+    resetCodeSalt: newResetCodeSalt, resetCodeHash: newResetCodeHash,
+    updatedAt: new Date().toISOString()
+  });
+  return {ok:true, account:{id:acct.id, email:acct.email}, resetCode:newResetCode};
+}
+
+/* ============================================================
+   ここから下は、この試作専用の最小限の画面ロジックです。
+   （管理者ログイン + 参加者からの記録送信/受信のデモ）
+   ============================================================ */
+var mode = 'participant';
+var state = {
+  authAccount: null,
+  authPhase: 'checking', // checking | setup | login | forgot | resetCodeShown | null(=authed)
+  authForm: {email:'', password:'', passwordConfirm:'', resetCode:''},
+  authBusy: false,
+  authError: null,
+  authShownCode: null,
+  authShownFor: null,
+  records: [],
+  participantName: '',
+  participantMsg: '',
+  participantBusy: false,
+  participantSent: false
+};
+var unsubRecords = null;
+
+function applyChrome(){
+  document.getElementById('mode-switch-btn').textContent = mode === 'manager' ? '参加者はこちら' : '管理者はこちら';
+  document.getElementById('brand-sub').textContent = mode === 'manager' ? 'MANAGER' : 'RECORD ENTRY';
+}
+document.getElementById('mode-switch-btn').addEventListener('click', function(){
+  mode = (mode === 'manager') ? 'participant' : 'manager';
+  applyChrome();
+  render();
+  if (mode === 'manager') checkAuthAndProceed();
+  else { if (unsubRecords){ unsubRecords(); unsubRecords = null; } startParticipant(); }
+});
+
+function render(){
+  var warnSlot = document.getElementById('db-warn-slot');
+  warnSlot.innerHTML = usingDb ? '' : '<p class="status-line err">⚠ Firebaseの初期化に失敗しています。firebaseConfigの値を確認してください。</p>';
+  var root = document.getElementById('view-root');
+  if (mode === 'manager'){
+    if (!state.authAccount || state.authPhase === 'resetCodeShown'){
+      root.innerHTML = viewAuth(); bindAuthView(); return;
+    }
+    root.innerHTML = viewManager(); bindManagerView(); return;
+  }
+  root.innerHTML = viewParticipant(); bindParticipantView();
+}
+
+/* ---- 管理者：認証画面 ---- */
+function viewAuth(){
+  if (state.authPhase === 'setup') return authSetupHtml();
+  if (state.authPhase === 'forgot') return authForgotHtml();
+  if (state.authPhase === 'resetCodeShown') return authResetCodeShownHtml();
+  if (state.authPhase === 'login') return authLoginHtml();
+  return '<p class="status-line">読み込んでいます…</p>';
+}
+function authErr(){ return state.authError ? '<p class="form-error">'+esc(state.authError)+'</p>' : ''; }
+function authSetupHtml(){
+  var f = state.authForm;
+  return '<div class="block">'+
+    '<h2 style="margin-top:0;">最初の管理者アカウントを登録</h2>'+
+    '<div class="field"><label>メールアドレス</label><input type="email" id="auth-email" value="'+esc(f.email)+'"></div>'+
+    '<div class="field"><label>パスワード（8文字以上）</label><input type="password" id="auth-password" value="'+esc(f.password)+'"></div>'+
+    '<div class="field"><label>パスワード（確認）</label><input type="password" id="auth-password-confirm" value="'+esc(f.passwordConfirm)+'"></div>'+
+    authErr()+
+    '<button class="primary-btn" id="auth-setup-btn" style="width:100%;">登録する</button>'+
+  '</div>';
+}
+function authLoginHtml(){
+  var f = state.authForm;
+  return '<div class="block">'+
+    '<h2 style="margin-top:0;">管理者ログイン</h2>'+
+    '<div class="field"><label>メールアドレス</label><input type="email" id="auth-email" value="'+esc(f.email)+'"></div>'+
+    '<div class="field"><label>パスワード</label><input type="password" id="auth-password" value="'+esc(f.password)+'"></div>'+
+    authErr()+
+    '<button class="primary-btn" id="auth-login-btn" style="width:100%;">ログイン</button>'+
+    '<div style="text-align:center; margin-top:.7rem;"><button class="link-btn" id="auth-goto-forgot-btn">パスワードをお忘れの場合</button></div>'+
+  '</div>';
+}
+function authForgotHtml(){
+  var f = state.authForm;
+  return '<div class="block">'+
+    '<h2 style="margin-top:0;">パスワードの再設定</h2>'+
+    '<div class="field"><label>メールアドレス</label><input type="email" id="auth-email" value="'+esc(f.email)+'"></div>'+
+    '<div class="field"><label>再設定コード</label><input type="text" id="auth-reset-code" value="'+esc(f.resetCode)+'"></div>'+
+    '<div class="field"><label>新しいパスワード</label><input type="password" id="auth-password" value="'+esc(f.password)+'"></div>'+
+    '<div class="field"><label>新しいパスワード（確認）</label><input type="password" id="auth-password-confirm" value="'+esc(f.passwordConfirm)+'"></div>'+
+    authErr()+
+    '<button class="primary-btn" id="auth-reset-btn" style="width:100%;">再設定する</button>'+
+    '<div style="text-align:center; margin-top:.7rem;"><button class="link-btn" id="auth-goto-login-btn">ログインに戻る</button></div>'+
+  '</div>';
+}
+function authResetCodeShownHtml(){
+  return '<div class="block">'+
+    '<h2 style="margin-top:0;">再設定コード</h2>'+
+    '<div class="reset-code-box"><div class="code">'+esc(state.authShownCode||'')+'</div></div>'+
+    '<p class="reset-code-warn">この画面を閉じると二度と表示されません。必ず控えてください。</p>'+
+    '<button class="primary-btn" id="auth-continue-btn" style="width:100%;">控えました。進む</button>'+
+  '</div>';
+}
+function bindAuthView(){
+  ['auth-email','auth-password','auth-password-confirm','auth-reset-code'].forEach(function(id){
+    var el = document.getElementById(id); if (!el) return;
+    var key = {'auth-email':'email','auth-password':'password','auth-password-confirm':'passwordConfirm','auth-reset-code':'resetCode'}[id];
+    el.addEventListener('input', function(){ state.authForm[key] = el.value; });
+  });
+  var b;
+  if ((b=document.getElementById('auth-setup-btn'))) b.addEventListener('click', submitAuthSetup);
+  if ((b=document.getElementById('auth-login-btn'))) b.addEventListener('click', submitAuthLogin);
+  if ((b=document.getElementById('auth-reset-btn'))) b.addEventListener('click', submitAuthReset);
+  if ((b=document.getElementById('auth-continue-btn'))) b.addEventListener('click', function(){ state.authPhase=null; state.authShownCode=null; startManager(); });
+  if ((b=document.getElementById('auth-goto-forgot-btn'))) b.addEventListener('click', function(){ state.authPhase='forgot'; state.authError=null; render(); });
+  if ((b=document.getElementById('auth-goto-login-btn'))) b.addEventListener('click', function(){ state.authPhase='login'; state.authError=null; render(); });
+}
+async function submitAuthSetup(){
+  var f = state.authForm;
+  var email = (f.email||'').trim();
+  if (!isValidEmailFormat(email)){ state.authError='メールアドレスの形式が正しくありません。'; render(); return; }
+  if ((f.password||'').length < 8){ state.authError='パスワードは8文字以上にしてください。'; render(); return; }
+  if (f.password !== f.passwordConfirm){ state.authError='パスワード（確認）が一致しません。'; render(); return; }
+  state.authBusy = true; state.authError = null; render();
+  try{
+    var existing = await findManagerAccountByEmail(normalizeEmail(email));
+    if (existing){ state.authBusy=false; state.authError='このメールアドレスはすでに登録されています。'; render(); return; }
+    var result = await createManagerAccount(email, f.password, null);
+    setStoredManagerAccountId(result.id);
+    state.authAccount = {id: result.id, email: result.email};
+    state.authShownCode = result.resetCode; state.authShownFor = result.email;
+    state.authBusy = false; state.authPhase = 'resetCodeShown'; render();
+  }catch(err){ console.error(err); state.authBusy=false; state.authError='登録に失敗しました: '+err.message; render(); }
+}
+async function submitAuthLogin(){
+  var f = state.authForm;
+  if (!f.email || !f.password){ state.authError='メールアドレスとパスワードを入力してください。'; render(); return; }
+  state.authBusy = true; state.authError = null; render();
+  try{
+    var result = await attemptManagerLogin(f.email, f.password);
+    state.authBusy = false;
+    if (!result.ok){ state.authError = result.error; render(); return; }
+    setStoredManagerAccountId(result.account.id);
+    state.authAccount = result.account; state.authPhase = null;
+    startManager();
+  }catch(err){ console.error(err); state.authBusy=false; state.authError='ログインに失敗しました: '+err.message; render(); }
+}
+async function submitAuthReset(){
+  var f = state.authForm;
+  if (!f.email || !f.resetCode){ state.authError='メールアドレスと再設定コードを入力してください。'; render(); return; }
+  if ((f.password||'').length < 8){ state.authError='パスワードは8文字以上にしてください。'; render(); return; }
+  if (f.password !== f.passwordConfirm){ state.authError='パスワード（確認）が一致しません。'; render(); return; }
+  state.authBusy = true; state.authError = null; render();
+  try{
+    var result = await attemptManagerReset(f.email, f.resetCode, f.password);
+    state.authBusy = false;
+    if (!result.ok){ state.authError = result.error; render(); return; }
+    setStoredManagerAccountId(result.account.id);
+    state.authAccount = result.account;
+    state.authShownCode = result.resetCode; state.authShownFor = result.account.email;
+    state.authPhase = 'resetCodeShown'; render();
+  }catch(err){ console.error(err); state.authBusy=false; state.authError='再設定に失敗しました: '+err.message; render(); }
+}
+async function checkAuthAndProceed(){
+  state.authPhase = 'checking'; render();
+  if (!usingDb) return;
+  var storedId = getStoredManagerAccountId();
+  if (storedId){
+    try{
+      var snap = await dbApi.doc('managerAccounts/'+storedId).get();
+      if (snap.exists){
+        state.authAccount = {id: storedId, email: (snap.data()||{}).email};
+        state.authPhase = null; startManager(); return;
+      }
+    }catch(e){ console.warn(e); }
+    clearStoredManagerAccountId();
+  }
+  state.authAccount = null;
+  try{
+    var qs = await dbApi.collection('managerAccounts').limit(1).get();
+    state.authPhase = qs.empty ? 'setup' : 'login';
+  }catch(e){ console.warn(e); state.authPhase = 'login'; }
+  state.authForm = {email:'', password:'', passwordConfirm:'', resetCode:''};
+  render();
+}
+
+/* ---- 管理者：記録の一覧（デモ） ---- */
+function viewManager(){
+  return '<div class="block">'+
+      '<p class="hint" style="margin:0;">ログイン中: <b>'+esc((state.authAccount&&state.authAccount.email)||'')+'</b> '+
+      '<button class="link-btn" id="manager-logout-btn">ログアウト</button></p>'+
+    '</div>'+
+    '<div class="block">'+
+      '<h2 style="margin-top:0;">参加者からの記録（リアルタイム受信テスト）</h2>'+
+      (state.records.length ? state.records.map(recordCardHtml).join('') : '<div class="empty">まだ記録がありません。参加者画面から送信してみてください。</div>')+
+    '</div>';
+}
+function recordCardHtml(r){
+  var t = r.createdAt ? new Date(r.createdAt).toLocaleString('ja-JP') : '';
+  return '<div class="record-card"><div class="name">'+esc(r.name||'匿名')+'</div>'+
+    '<div class="time">'+esc(t)+'</div>'+
+    '<div class="msg">'+esc(r.message||'')+'</div></div>';
+}
+function bindManagerView(){
+  var b = document.getElementById('manager-logout-btn');
+  if (b) b.addEventListener('click', function(){
+    clearStoredManagerAccountId();
+    state.authAccount = null; state.authPhase = null;
+    if (unsubRecords){ unsubRecords(); unsubRecords = null; }
+    checkAuthAndProceed();
+  });
+}
+function startManager(){
+  render();
+  if (unsubRecords) unsubRecords();
+  unsubRecords = dbApi.collection('demoRecords').orderBy('createdAt','desc').limit(50).onSnapshot(
+    function(qs){
+      state.records = [];
+      qs.forEach(function(d){ state.records.push(Object.assign({}, d.data()||{}, {id:d.id})); });
+      render();
+    },
+    function(err){ console.warn('records onSnapshot error', err); }
+  );
+}
+
+/* ---- 参加者：記録の送信（デモ） ---- */
+function viewParticipant(){
+  if (!usingDb) return '<p class="status-line err">Firebaseに接続できていません。</p>';
+  return '<div class="block">'+
+    '<h2 style="margin-top:0;">記録を送信するテスト</h2>'+
+    '<p class="hint" style="margin-top:-.3rem;">送信すると、管理者画面にリアルタイムで反映されるかを確認できます。</p>'+
+    '<div class="field"><label>お名前（任意）</label><input type="text" id="p-name" value="'+esc(state.participantName)+'"></div>'+
+    '<div class="field"><label>メッセージ</label><textarea id="p-msg" rows="3">'+esc(state.participantMsg)+'</textarea></div>'+
+    (state.participantSent ? '<p class="status-line">✓ 送信しました</p>' : '')+
+    '<button class="primary-btn" id="p-send-btn" style="width:100%;"'+(state.participantBusy?' disabled':'')+'>'+(state.participantBusy?'送信中…':'送信する')+'</button>'+
+  '</div>';
+}
+function bindParticipantView(){
+  var n = document.getElementById('p-name'), m = document.getElementById('p-msg');
+  if (n) n.addEventListener('input', function(){ state.participantName = n.value; });
+  if (m) m.addEventListener('input', function(){ state.participantMsg = m.value; });
+  var b = document.getElementById('p-send-btn');
+  if (b) b.addEventListener('click', async function(){
+    if (!(state.participantMsg||'').trim()) return;
+    state.participantBusy = true; state.participantSent = false; render();
+    try{
+      await addDoc('demoRecords', {
+        name: (state.participantName||'').trim(),
+        message: state.participantMsg.trim(),
+        createdAt: new Date().toISOString()
+      });
+      state.participantMsg = ''; state.participantSent = true;
+    }catch(err){ console.error(err); alert('送信に失敗しました: '+err.message); }
+    state.participantBusy = false; render();
+  });
+}
+function startParticipant(){ render(); }
+
+/* ---- 起動 ---- */
+applyChrome();
+render();
+startParticipant();
+</script>
+</body>
+</html>
