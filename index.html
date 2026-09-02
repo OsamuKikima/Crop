@@ -174,7 +174,7 @@
   .session-head .edit-link{background:none; border:none; color:var(--accent-strong); font-size:.76rem; font-weight:700; cursor:pointer; margin-left:.5rem;}
 
   .qr-wrap{display:flex; gap:1.2rem; align-items:center; flex-wrap:wrap;}
-  #qr-canvas-holder{background:#fff; padding:10px; border-radius:10px; border:1px solid var(--line); flex:none;}
+  #qr-canvas-holder, .group-qr-holder{background:#fff; padding:10px; border-radius:10px; border:1px solid var(--line); flex:none;}
   .qr-side{flex:1; min-width:180px;}
   .link-row{display:flex; gap:.5rem; margin-top:.5rem;}
   .link-row input{flex:1; min-width:0; background:var(--surface-2); border:1px solid var(--line); border-radius:8px; padding:.5rem .6rem; font-size:.78rem; font-family:var(--font-mono); color:var(--ink-soft); overflow:hidden; text-overflow:ellipsis;}
@@ -694,16 +694,27 @@
     return str.slice(0,best) + '\n…(文字数の都合により以下省略)';
   }
   function linkFor(sessionId, groupId){
-    // Points at THIS SAME artifact (manager + participant are now one
-    // combined app sharing one db store — the db capability is scoped
-    // per-artifact, so two separate artifacts could never share session
-    // data). session/group are still appended as URL params as a
-    // harmless best-effort fast path, but they don't reliably reach the
-    // page in this hosting environment (confirmed empirically: the
-    // page's own location is a platform-generated frame URL, not the
-    // outer share link) — the real, reliable mechanism is the on-page
-    // folder/group picker shown in participant mode, which needs no URL
-    // params at all.
+    // Points at THIS SAME page (manager + participant are one combined app
+    // sharing one db store). session/group are appended as URL params
+    // (both in the query string AND the hash — see paramsFromLocation()
+    // in the Participant module) so that opening this link/QR lands the
+    // participant directly on that specific workshop (and group, if any),
+    // skipping the folder/group picker entirely.
+    //
+    // Historical note: while this app was hosted as a Claude artifact, the
+    // page ran inside a platform-controlled iframe whose own location did
+    // not reliably reflect the outer share link's query string, so this
+    // mechanism could silently fail. Now that the app is served directly
+    // from GitHub Pages (a plain static host, no wrapping iframe), the
+    // browser navigates straight to this exact URL and location.search
+    // reliably carries these params — confirmed with an automated test
+    // that loads this page from a plain static server with
+    // ?session=...&group=... and verifies it lands directly on that
+    // workshop/group, bypassing the picker. The hash fallback and the
+    // document.referrer fallback in paramsFromLocation() are kept as
+    // harmless extra safety nets (e.g. for QR scanner apps or link
+    // shorteners that might otherwise mangle a query string), not because
+    // the primary query-string path is expected to fail on GitHub Pages.
     var qs = 'session=' + encodeURIComponent(sessionId) + (groupId ? '&group=' + encodeURIComponent(groupId) : '');
     return CANONICAL_URL + '?' + qs + '#' + qs;
   }
@@ -714,6 +725,40 @@
   // near the top of the file).
   function participantEntryUrl(){
     return CANONICAL_URL + '?mode=participant';
+  }
+  // Strips characters that are unsafe/awkward in a downloaded filename
+  // (path separators, Windows-reserved chars) and collapses whitespace,
+  // so a workshop/group name a facilitator typed freely can be used
+  // directly as (part of) a PNG filename.
+  function sanitizeFilenamePart(s){
+    return String(s||'').trim().replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g,'_').slice(0,60) || '無題';
+  }
+  // Downloads the QR code currently rendered inside #holderId as a PNG file.
+  // qrcodejs (the QRCode global) renders into a <canvas>, so
+  // canvas.toDataURL('image/png') is the primary path; a plain <img> is
+  // checked as a defensive fallback in case the library ever falls back to
+  // an img-based render in some browser. The <a download> click happens
+  // synchronously inside the button's own click handler (no await in
+  // between), which is required for this to work in Safari.
+  function downloadQrPng(holderId, filename){
+    var holder = document.getElementById(holderId);
+    if (!holder){ toast('QRコードが見つかりませんでした'); return; }
+    var canvas = holder.querySelector('canvas');
+    var dataUrl = null;
+    if (canvas && canvas.toDataURL){
+      try{ dataUrl = canvas.toDataURL('image/png'); }catch(e){}
+    }
+    if (!dataUrl){
+      var img = holder.querySelector('img');
+      if (img && img.src && img.src.indexOf('data:') === 0) dataUrl = img.src;
+    }
+    if (!dataUrl){ toast('QRコードの画像を取得できませんでした'); return; }
+    var a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   }
   function generateGroupName(index, total){
     if (total <= 26) return String.fromCharCode(65 + index);
@@ -1397,18 +1442,26 @@
             '<div class="qr-side">' +
               '<p class="hint" style="margin-top:0;">このQRコードを読み取ると、ワークの記録を送信 Popが直接開きます。</p>' +
               '<div class="link-row"><input type="text" readonly id="participant-entry-link-text" value="' + esc(participantEntryUrl()) + '"><button class="btn-sm" id="copy-participant-entry-link-btn">リンクをコピー</button></div>' +
+              '<div class="link-row"><button class="btn-sm" id="download-entry-qr-btn">QRコードをダウンロード</button></div>' +
             '</div>' +
           '</div>' +
         '</details>' +
       '</section>' +
-      (state.sessions.length ?
-        state.sessions.map(function(s){
+      (function(){
+        var list = visibleSessions();
+        if (!list.length){
+          return '<div class="empty"><div class="big">📁</div>ワークショップはまだありません。<br>「新しい記録帳を作成」から始めましょう。</div>';
+        }
+        var showCreator = currentAccountIsMaster();
+        return list.map(function(s){
           return '<div class="s-card" data-open="' + s.id + '">' +
-            '<div class="info"><div class="date">' + esc(s.dateISO||'—') + '</div><h3>' + esc(s.title||'無題のワークショップ') + '</h3></div>' +
+            '<div class="info"><div class="date">' + esc(s.dateISO||'—') + '</div><h3>' + esc(s.title||'無題のワークショップ') + '</h3>' +
+              (showCreator ? '<div class="hint" style="margin-top:.15rem;">作成者: ' + esc(facilitatorLabelFor(s.createdBy)) + '</div>' : '') +
+            '</div>' +
             '<div class="arrow">›</div>' +
           '</div>';
-        }).join('')
-        : '<div class="empty"><div class="big">📁</div>ワークショップはまだありません。<br>「新しい記録帳を作成」から始めましょう。</div>')
+        }).join('');
+      })()
     );
   }
 
@@ -1561,7 +1614,7 @@
       return (
         '<section class="block">' +
           '<h2>参加コード</h2>' +
-          '<p class="hint" style="margin-top:0;">下のコードを参加者に伝えてください。参加者は入力画面の「参加コードで参加」欄にこのコードを入力するだけで、直接この記録帳の記録画面を開けます（QRコード・リンクは開くとこのアプリ自体は開きますが、環境によってはワークショップが自動で選ばれないため、コードでの案内をおすすめします）。</p>' +
+          '<p class="hint" style="margin-top:0;">下のコードを参加者に伝えてください。参加者は入力画面の「参加コードで参加」欄にこのコードを入力するだけで、直接この記録帳の記録画面を開けます。QRコード・リンクを使うと、読み取る・開くだけでこのワークショップの記録画面に直接移動します。</p>' +
           (s.joinCode ?
             '<div class="link-row"><input type="text" readonly id="join-code-text" value="' + esc(s.joinCode) + '" style="font-family:var(--font-mono); font-weight:700; letter-spacing:.12em; font-size:1rem;"><button class="btn-sm primary" data-copy-code="' + esc(s.joinCode) + '">コードをコピー</button></div>'
             : '<p class="hint">参加コードを準備しています…</p>') +
@@ -1569,8 +1622,9 @@
             '<div class="qr-wrap" style="margin-top:.6rem;">' +
               '<div id="qr-canvas-holder"></div>' +
               '<div class="qr-side">' +
-                '<p class="hint" style="margin-top:0;">このQRコードを読み取ると入力画面が開きます。ワークショップは自動で選ばれない場合があるため、その際は上の参加コードをご利用ください。</p>' +
+                '<p class="hint" style="margin-top:0;">このQRコードを読み取ると、直接このワークショップの記録画面が開きます。</p>' +
                 '<div class="link-row"><input type="text" readonly id="link-text" value="' + esc(linkFor(state.currentId)) + '"><button class="btn-sm" id="copy-link-btn">リンクをコピー</button></div>' +
+                '<div class="link-row"><button class="btn-sm" id="download-qr-btn">QRコードをダウンロード</button></div>' +
               '</div>' +
             '</div>' +
           '</details>' +
@@ -1585,7 +1639,7 @@
     return (
       '<section class="block">' +
         '<h2>グループ別 参加コード</h2>' +
-        '<p class="hint" style="margin-top:0; margin-bottom:.9rem;">' + modeHint + '（グループ別のQRコードやリンクは自動でグループを選べないため廃止しました）グループ名や参加方法の設定は、上の「編集」からいつでも変更できます。</p>' +
+        '<p class="hint" style="margin-top:0; margin-bottom:.9rem;">' + modeHint + ' QRコード・リンクを使うと、読み取る・開くだけでそのグループの記録画面に直接移動します。グループ名や参加方法の設定は、上の「編集」からいつでも変更できます。</p>' +
         groups.map(groupCardHtml).join('') +
         '<button class="btn-sm" id="add-group-btn" style="margin-top:.3rem;">＋ グループを追加</button>' +
       '</section>'
@@ -1608,6 +1662,16 @@
           (g.joinCode ?
             '<div class="link-row"><input type="text" readonly class="join-code-input" value="' + esc(g.joinCode) + '" style="font-family:var(--font-mono); font-weight:700; letter-spacing:.12em; font-size:1rem;"><button class="btn-sm primary" data-copy-code="' + esc(g.joinCode) + '">コードをコピー</button></div>'
             : '<p class="hint" style="margin:.4rem 0 0;">参加コードを準備しています…</p>') +
+          '<details style="margin-top:.5rem;"><summary class="hint" style="cursor:pointer;">QRコード・リンクを表示</summary>' +
+            '<div class="qr-wrap" style="margin-top:.5rem;">' +
+              '<div id="qr-canvas-holder-' + esc(g.id) + '" class="group-qr-holder"></div>' +
+              '<div class="qr-side">' +
+                '<p class="hint" style="margin-top:0;">このQRコードを読み取ると、直接このグループの記録画面が開きます。</p>' +
+                '<div class="link-row"><input type="text" readonly id="link-text-' + esc(g.id) + '" value="' + esc(linkFor(state.currentId, g.id)) + '"><button class="btn-sm" data-copy-group-link="' + esc(g.id) + '">リンクをコピー</button></div>' +
+                '<div class="link-row"><button class="btn-sm" data-download-group-qr="' + esc(g.id) + '">QRコードをダウンロード</button></div>' +
+              '</div>' +
+            '</div>' +
+          '</details>' +
         '</div>' +
         '<button class="icon-btn" data-del-group="' + g.id + '" aria-label="グループを削除">🗑</button>' +
       '</div>'
@@ -1880,6 +1944,10 @@
         try{ await navigator.clipboard.writeText(input.value); toast('リンクをコピーしました'); }
         catch(e){ toast('コピーできませんでした。テキストを選択してコピーしてください'); }
       });
+      var downloadEntryQrBtn = document.getElementById('download-entry-qr-btn');
+      if (downloadEntryQrBtn) downloadEntryQrBtn.addEventListener('click', function(){
+        downloadQrPng('participant-entry-qr-holder', '参加者入り口QRコード.png');
+      });
     }
 
     if (state.view === 'admins'){
@@ -1952,7 +2020,7 @@
     }
 
     if (state.view === 'detail'){
-      if (!state.groups.length) renderQr();
+      if (!state.groups.length) renderQr(); else renderGroupQrs();
 
       var copyBtn = document.getElementById('copy-link-btn');
       if (copyBtn) copyBtn.addEventListener('click', async function(){
@@ -1960,6 +2028,33 @@
         input.focus(); input.select();
         try{ await navigator.clipboard.writeText(input.value); toast('リンクをコピーしました'); }
         catch(e){ toast('コピーできませんでした。テキストを選択してコピーしてください'); }
+      });
+
+      var downloadQrBtn = document.getElementById('download-qr-btn');
+      if (downloadQrBtn) downloadQrBtn.addEventListener('click', function(){
+        var title = (state.currentSession && state.currentSession.title) || 'ワークショップ';
+        downloadQrPng('qr-canvas-holder', sanitizeFilenamePart(title) + '_QRコード.png');
+      });
+
+      document.querySelectorAll('[data-copy-group-link]').forEach(function(btn){
+        btn.addEventListener('click', async function(){
+          var gid = btn.dataset.copyGroupLink;
+          var input = document.getElementById('link-text-' + gid);
+          if (!input) return;
+          input.focus(); input.select();
+          try{ await navigator.clipboard.writeText(input.value); toast('リンクをコピーしました'); }
+          catch(e){ toast('コピーできませんでした。テキストを選択してコピーしてください'); }
+        });
+      });
+
+      document.querySelectorAll('[data-download-group-qr]').forEach(function(btn){
+        btn.addEventListener('click', function(){
+          var gid = btn.dataset.downloadGroupQr;
+          var g = (state.groups||[]).find(function(x){ return x.id === gid; });
+          var title = (state.currentSession && state.currentSession.title) || 'ワークショップ';
+          var groupName = g ? g.name : 'グループ';
+          downloadQrPng('qr-canvas-holder-' + gid, sanitizeFilenamePart(title) + '_' + sanitizeFilenamePart(groupName) + '_QRコード.png');
+        });
       });
 
       document.querySelectorAll('[data-copy-code]').forEach(function(btn){
@@ -2343,6 +2438,21 @@
       new QRCode(holder, { text: linkFor(state.currentId), width:180, height:180, colorDark:'#20242b', colorLight:'#ffffff' });
     }catch(e){ console.warn('QR render failed', e); holder.innerHTML = '<p class="hint">QRコードを表示できませんでした</p>'; }
   }
+  // グループごとのQR・リンク（linkFor(sessionId, groupId)）。GitHub Pages配信では
+  // ?session=...&group=...のURLパラメータが確実に届く（location.searchがそのまま
+  // 使える、iframe越しではない）ため、以前は「自動でグループを選べない」という
+  // 理由で廃止していたグループ別QR・リンクを復活させたもの。
+  function renderGroupQrs(){
+    if (typeof QRCode === 'undefined') return;
+    (state.groups||[]).forEach(function(g){
+      var holder = document.getElementById('qr-canvas-holder-' + g.id);
+      if (!holder) return;
+      holder.innerHTML = '';
+      try{
+        new QRCode(holder, { text: linkFor(state.currentId, g.id), width:140, height:140, colorDark:'#20242b', colorLight:'#ffffff' });
+      }catch(e){ console.warn('group QR render failed', e); holder.innerHTML = '<p class="hint">QRコードを表示できませんでした</p>'; }
+    });
+  }
   function renderParticipantEntryQr(){
     var holder = document.getElementById('participant-entry-qr-holder');
     if (!holder || typeof QRCode === 'undefined') return;
@@ -2412,6 +2522,16 @@
 
   function openSession(id, preload){
     preload = preload || {};
+    // アクセス制御（多層防御・その1）: 一覧側ですでに絞り込んでいるが、
+    // すでに読み込み済みのstate.sessionsに該当ワークショップの情報があれば、
+    // ここでも自分の作成物かどうかを確認してから開く。
+    if (!currentAccountIsMaster()){
+      var known = (state.sessions||[]).filter(function(s){ return s.id === id; })[0];
+      if (known && !canAccessSession(known)){
+        toast('このワークショップを開く権限がありません');
+        return;
+      }
+    }
     state.currentId = id;
     state.view = 'detail';
     state.entryPhotos = {}; state.expandedId = null; state.selected = new Set();
@@ -2428,7 +2548,24 @@
     if (unsubSections) unsubSections();
     if (unsubReflection) unsubReflection();
     unsubCurrent = dbApi.doc('sessions/'+id).onSnapshot(function(snap){
-      if (snap.exists){ state.currentSession = snap.data(); __sessionDocSeen[id] = true; if (state.view==='detail') render(); ensureJoinCodes(); }
+      if (snap.exists){
+        var data = snap.data();
+        // アクセス制御（多層防御・その2）: 一覧に載っていなかった等の理由で
+        // その1のチェックをすり抜けた場合でも、実データ取得後にここで再確認し、
+        // 自分の作成物でなければ一覧へ強制的に戻す。
+        if (!canAccessSession(data)){
+          toast('このワークショップを開く権限がありません');
+          if (unsubCurrent) { unsubCurrent(); unsubCurrent = null; }
+          if (unsubEntries) { unsubEntries(); unsubEntries = null; }
+          if (unsubGroups) { unsubGroups(); unsubGroups = null; }
+          if (unsubSections) { unsubSections(); unsubSections = null; }
+          if (unsubReflection) { unsubReflection(); unsubReflection = null; }
+          state.currentId = null; state.currentSession = null; state.view = 'sessions';
+          render();
+          return;
+        }
+        state.currentSession = data; __sessionDocSeen[id] = true; if (state.view==='detail') render(); ensureJoinCodes();
+      }
     });
     unsubEntries = dbApi.collection('sessions/'+id+'/entries').orderBy('createdAt','desc').limit(500).onSnapshot(
       function(qs){
@@ -2540,6 +2677,38 @@
     return currentWorkshopCount() < limit;
   }
 
+  // アクセス制御: マスターファシリテーター（kikimaosamu@gmail.com）はすべての
+  // ファシリテーターが作成したワークショップを閲覧・編集・削除できるが、
+  // それ以外のファシリテーターは自分が作成したワークショップしか見えない
+  // ようにする。db capability自体は全ビューアが読み書きできる共有ストア
+  // （このアプリのメインファシリテーター認証と同じくUIレベルの制御であり、Firestore側の
+  // セキュリティルールによる強制ではない）ため、一覧の絞り込みに加えて
+  // openSession()側でも多層防御として同じ判定を行う。
+  function visibleSessions(){
+    if (currentAccountIsMaster()) return state.sessions || [];
+    var myId = state.authAccount && state.authAccount.id;
+    return (state.sessions||[]).filter(function(s){ return s.createdBy === myId; });
+  }
+  function canAccessSession(sessionData){
+    if (!sessionData) return false;
+    if (currentAccountIsMaster()) return true;
+    return sessionData.createdBy === (state.authAccount && state.authAccount.id);
+  }
+  // マスター向け: 一覧に「作成者」を表示するための、アカウントID→メール
+  // アドレスの対応表。マスターがセッション一覧を開いたときに一度だけ
+  // fetchAdminAccounts()で取得する（ensureFacilitatorDirectory()参照）。
+  function facilitatorLabelFor(accountId){
+    if (!accountId) return '不明';
+    if (state.authAccount && accountId === state.authAccount.id) return (state.authAccount.email||'') + '（自分）';
+    var found = (state.adminAccounts||[]).filter(function(a){ return a.id === accountId; })[0];
+    return found ? found.email : '不明なアカウント';
+  }
+  function ensureFacilitatorDirectory(){
+    if (!currentAccountIsMaster()) return;
+    if (state.adminAccounts && state.adminAccounts.length) return;
+    fetchAdminAccounts().then(function(){ if (state.view === 'sessions') render(); });
+  }
+
   async function createSession(){
     var f = state.newForm;
     if (!f.title.trim()){ toast('件名を入力してください'); return; }
@@ -2642,6 +2811,11 @@
 
   async function deleteSession(){
     var id = state.currentId;
+    // アクセス制御（多層防御・その3）: 削除実行時にも念のため再確認する。
+    if (!canAccessSession(state.currentSession)){
+      toast('このワークショップを削除する権限がありません');
+      return;
+    }
     try{
       var entriesSnap = await dbApi.collection('sessions/'+id+'/entries').get();
       for (var i=0;i<entriesSnap.docs.length;i++){
@@ -2942,6 +3116,7 @@
         openAdmins();
       } else {
         render();
+        ensureFacilitatorDirectory();
         unsubSessions = dbApi.collection('sessions').orderBy('dateISO','desc').limit(200).onSnapshot(
           function(qs){
             state.sessions = qs.docs.map(function(d){ var data=Object.assign({}, d.data()||{}, {id:d.id}); return data; });
@@ -3002,12 +3177,13 @@
     var hash = (location.hash || '').replace(/^#/, '');
     var fromHash = new URLSearchParams(hash);
     if (fromHash.get('session')) return fromHash;
-    // Some hosting paths for a shared artifact link don't carry the query
-    // string or hash from the original share URL into this page's own
-    // location (this page can run inside a frame whose src the host
-    // controls). document.referrer sometimes still holds the original
-    // URL the visitor followed, so try parsing session/group out of that
-    // as a last resort before giving up.
+    // On GitHub Pages (a plain static host with no wrapping iframe),
+    // location.search above is expected to reliably carry the session/
+    // group params from a clicked link or scanned QR code — this
+    // referrer-based fallback is just an extra safety net for unusual
+    // cases (e.g. a QR scanner app or link shortener that strips the
+    // query string during its own redirect) where document.referrer
+    // might still hold the original URL the visitor followed.
     var fromReferrer = extractParams(document.referrer);
     if (fromReferrer) return fromReferrer;
     return fromSearch; // neither has it — fall through to the "no folder" message
