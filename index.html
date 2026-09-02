@@ -1,3 +1,13 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<!-- 参加者からの記録送信 Pop はスマートフォンでの利用を主に想定しているため、
+     実機の画面幅にきちんと収まるよう viewport を明示する。
+     （Claudeアーティファクトとして動いていたときは、ホスト側のページが
+     自動的にこのタグを付けてくれていたため不要だったが、GitHub Pages
+     など単独のHTMLとして配信する場合は自分で用意する必要がある） -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>ワークショップ記録帳 Crop</title>
 <meta name="description" content="ワークショップのフォルダを作成してQRコードを発行し、参加者は同じリンクから記録を入力。集まった記録や概要情報をCSVで書き出せる、ひとつにまとまった記録ツール。">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Kosugi+Maru&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@500;600&display=swap">
@@ -7,6 +17,9 @@
 <!-- Firebase SDK（compatバージョン。<script>タグでそのまま使えます） -->
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<!-- reCAPTCHA v2（チェックボックス）。最初の管理者登録画面のみで使用。
+     読み込みに失敗しても他の画面は問題なく動くよう async にしてある。 -->
+<script src="https://www.google.com/recaptcha/api.js?hl=ja" async defer></script>
 
 <style>
   :root{
@@ -349,6 +362,8 @@
   .feed-entry-top .time{margin-left:auto; font-family:var(--font-mono); font-size:.68rem; color:var(--ink-faint);}
   .feed-entry .preview{margin:0; font-size:.82rem; color:var(--ink-soft); overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;}
 </style>
+</head>
+<body>
 
 <div class="app" id="app-root">
   <header class="topbar">
@@ -394,7 +409,7 @@
      標準のダウンロード機能に置き換えている（この3つ以外のロジックは
      元アプリ(gijinote-unified.html)から変更していない）。
   ============================================================ */
-var firebaseConfig = {
+  var firebaseConfig = {
   apiKey: "AIzaSyBpegGmC8JH7svjZlhgGWxNoyIjTmIZzp0",
   authDomain: "crop-27ef5.firebaseapp.com",
   projectId: "crop-27ef5",
@@ -402,6 +417,13 @@ var firebaseConfig = {
   messagingSenderId: "787923806496",
   appId: "1:787923806496:web:aa8faf6b596ad014448f45"
 };
+
+  // reCAPTCHA v2（チェックボックス）のサイトキー。
+  // https://www.google.com/recaptcha/admin で「v2 / “I'm not a robot”チェックボックス」
+  // を選んで登録し、発行された「サイトキー」をここに貼り付けてください
+  // （「シークレットキー」はサーバー側でしか使えないため、ここには不要です／貼らないでください）。
+  // 未設定（このままの値）のときは、最初の管理者登録画面にreCAPTCHAを表示しません。
+  var RECAPTCHA_SITE_KEY = "6Lf3cqQtAAAAAOj-G8Q7KtFqyvuN299DR__pCokl";
 
   var dbApi = null, sampleApi = null, downloadsApi = null;
   var dbReady = (async function(){
@@ -663,7 +685,7 @@ var firebaseConfig = {
     return CANONICAL_URL + '?' + qs + '#' + qs;
   }
   // The general participant entry point — not scoped to any one folder.
-  // Opening this URL always lands on 「参加者からの記録送信 ログポスト」
+  // Opening this URL always lands on 「参加者からの記録送信 Pop」
   // (the folder-picker screen participants start from), regardless of
   // what mode this browser last used (see the `mode` URL param handling
   // near the top of the file).
@@ -740,7 +762,7 @@ var firebaseConfig = {
   // A URL like "...?mode=participant" (see participantEntryUrl() /
   // viewSessions()'s QR code) always opens straight into that mode, no
   // matter what this browser last used — this is what makes the manager's
-  // "参加者からの記録送信 ログポスト" link/QR reliable even on a device
+  // "参加者からの記録送信 Pop" link/QR reliable even on a device
   // that was previously used in manager mode.
   function modeFromUrl(){
     try{
@@ -918,7 +940,7 @@ var firebaseConfig = {
       authRoot.innerHTML = viewAuth();
       bindAuthView();
       warnSlot.innerHTML = usingDb ? '' :
-        '<p class="db-warn">⚠️ オンライン保存機能を利用できないため、この画面は使用できません。Claudeのアーティファクトとして開いた状態でご利用ください。</p>';
+        '<p class="db-warn">⚠️ Firebaseへの接続に失敗しました。ファイル内のfirebaseConfigの値（セットアップ手順書を参照）が正しく設定されているかご確認ください。</p>';
       return;
     }
 
@@ -932,7 +954,7 @@ var firebaseConfig = {
     bindView();
 
     warnSlot.innerHTML = usingDb ? '' :
-      '<p class="db-warn">⚠️ オンライン保存機能を利用できないため、この画面は使用できません。Claudeのアーティファクトとして開いた状態でご利用ください。</p>';
+      '<p class="db-warn">⚠️ Firebaseへの接続に失敗しました。ファイル内のfirebaseConfigの値（セットアップ手順書を参照）が正しく設定されているかご確認ください。</p>';
 
     var backBtn = document.getElementById('back-btn');
     if (backBtn) backBtn.addEventListener('click', goSessions);
@@ -953,6 +975,34 @@ var firebaseConfig = {
     return state.authError ? '<p class="form-error">' + esc(state.authError) + '</p>' : '';
   }
 
+  // reCAPTCHA v2（最初の管理者登録画面のみ）。
+  // サイトキーが未設定（プレースホルダのまま）のときは、この記録帳をそのまま
+  // 使い始められるよう、reCAPTCHAなしで登録できるようにフォールバックする。
+  var recaptchaWidgetId = null;
+  function isRecaptchaConfigured(){
+    return !!RECAPTCHA_SITE_KEY && RECAPTCHA_SITE_KEY.indexOf('ここに') !== 0;
+  }
+  function renderAuthRecaptcha(){
+    var holder = document.getElementById('auth-recaptcha-holder');
+    if (!holder || !isRecaptchaConfigured()) return;
+    if (typeof grecaptcha === 'undefined' || !grecaptcha.render){
+      // api.js がまだ読み込み中（async）の可能性があるため、少し待って再試行する
+      setTimeout(renderAuthRecaptcha, 300);
+      return;
+    }
+    try{
+      recaptchaWidgetId = grecaptcha.render(holder, { sitekey: RECAPTCHA_SITE_KEY });
+    }catch(e){
+      // 二重描画などで失敗した場合は既存のウィジェットをそのまま使う
+      console.warn('reCAPTCHA render failed', e);
+    }
+  }
+  function resetAuthRecaptcha(){
+    try{
+      if (typeof grecaptcha !== 'undefined' && recaptchaWidgetId !== null) grecaptcha.reset(recaptchaWidgetId);
+    }catch(e){}
+  }
+
   function authSetupHtml(){
     var f = state.authForm;
     return (
@@ -962,6 +1012,7 @@ var firebaseConfig = {
         '<div class="field"><label for="auth-email">メールアドレス</label><input type="email" id="auth-email" value="' + esc(f.email) + '" placeholder="例: manager@example.com"></div>' +
         '<div class="field"><label for="auth-password">パスワード<span class="hint" style="font-weight:400;">（8文字以上）</span></label><input type="password" id="auth-password" value="' + esc(f.password) + '"></div>' +
         '<div class="field"><label for="auth-password-confirm">パスワード（確認）</label><input type="password" id="auth-password-confirm" value="' + esc(f.passwordConfirm) + '"></div>' +
+        (isRecaptchaConfigured() ? '<div class="field"><div id="auth-recaptcha-holder"></div></div>' : '') +
         authErrorHtml() +
         '<p class="hint">登録すると、パスワードを忘れたときのための「再設定コード」が1回だけ表示されます。必ず控えて安全な場所に保管してください（コードとパスワードの両方を忘れると、そのアカウントは二度と使えなくなります）。</p>' +
         '<button class="primary-btn" id="auth-setup-btn" style="width:100%;"' + (state.authBusy?' disabled':'') + '>' + (state.authBusy?'登録中…':'登録する') + '</button>' +
@@ -1025,6 +1076,9 @@ var firebaseConfig = {
     if (ePassConfirm) ePassConfirm.addEventListener('input', function(){ state.authForm.passwordConfirm = ePassConfirm.value; });
     if (eResetCode) eResetCode.addEventListener('input', function(){ state.authForm.resetCode = eResetCode.value; });
 
+    recaptchaWidgetId = null;
+    renderAuthRecaptcha();
+
     var setupBtn = document.getElementById('auth-setup-btn');
     if (setupBtn) setupBtn.addEventListener('click', submitAuthSetup);
     var loginBtn = document.getElementById('auth-login-btn');
@@ -1059,12 +1113,19 @@ var firebaseConfig = {
     if (!isValidEmailFormat(email)){ state.authError = 'メールアドレスの形式が正しくありません。'; render(); return; }
     if ((f.password||'').length < 8){ state.authError = 'パスワードは8文字以上にしてください。'; render(); return; }
     if (f.password !== f.passwordConfirm){ state.authError = 'パスワード（確認）が一致しません。'; render(); return; }
+    if (isRecaptchaConfigured()){
+      var recaptchaResponse = (typeof grecaptcha !== 'undefined' && recaptchaWidgetId !== null) ? grecaptcha.getResponse(recaptchaWidgetId) : '';
+      if (!recaptchaResponse){
+        state.authError = '「私はロボットではありません」にチェックを入れてください。';
+        render(); return;
+      }
+    }
     state.authBusy = true; state.authError = null; render();
     try{
       var existing = await findManagerAccountByEmail(normalizeEmail(email));
       if (existing){
         state.authBusy = false; state.authError = 'このメールアドレスはすでに登録されています。ログインしてください。';
-        render(); return;
+        resetAuthRecaptcha(); render(); return;
       }
       var result = await createManagerAccount(email, f.password, null);
       setStoredManagerAccountId(result.id);
@@ -1078,6 +1139,7 @@ var firebaseConfig = {
       console.error(err);
       state.authBusy = false;
       state.authError = '登録に失敗しました。もう一度お試しください。';
+      resetAuthRecaptcha();
       render();
     }
   }
@@ -1244,13 +1306,13 @@ var firebaseConfig = {
         '<button class="auth-switch-link" id="manager-logout-btn2" type="button">ログアウト</button>' +
       '</p>' +
       '<section class="block">' +
-        '<h2 style="margin-top:0;">参加者からの記録送信 ログポスト</h2>' +
-        '<p class="hint" style="margin-top:0;">このリンク・QRコードを開くと、端末が以前どちらのモードで使われていたかに関わらず、参加者がフォルダを選ぶ画面（参加者からの記録送信 ログポスト）に直接アクセスできます。会場の入り口などに掲示・配布してください。</p>' +
+        '<h2 style="margin-top:0;">参加者からの記録送信 Pop</h2>' +
+        '<p class="hint" style="margin-top:0;">このリンク・QRコードを開くと、端末が以前どちらのモードで使われていたかに関わらず、参加者がフォルダを選ぶ画面（参加者からの記録送信 Pop）に直接アクセスできます。会場の入り口などに掲示・配布してください。</p>' +
         '<details style="margin-top:.6rem;"><summary class="hint" style="cursor:pointer;">QRコード・リンクを表示</summary>' +
           '<div class="qr-wrap" style="margin-top:.6rem;">' +
             '<div id="participant-entry-qr-holder"></div>' +
             '<div class="qr-side">' +
-              '<p class="hint" style="margin-top:0;">このQRコードを読み取ると、参加者からの記録送信 ログポストが直接開きます。</p>' +
+              '<p class="hint" style="margin-top:0;">このQRコードを読み取ると、参加者からの記録送信 Popが直接開きます。</p>' +
               '<div class="link-row"><input type="text" readonly id="participant-entry-link-text" value="' + esc(participantEntryUrl()) + '"><button class="btn-sm" id="copy-participant-entry-link-btn">リンクをコピー</button></div>' +
             '</div>' +
           '</div>' +
@@ -1294,7 +1356,7 @@ var firebaseConfig = {
         '<div class="field"><label for="nf-sections">記録する問いの数</label>' + countSelectHtml('nf-sections', f.sectionCount, 20, 'なし', '') + '</div>' +
         '<p class="hint" style="margin-top:-.5rem; margin-bottom:.9rem;">ワークショップが複数の問い(進行フェーズ)に分かれる場合は数を選んでください。進行中に管理画面から次の問いへ進められ、あとから追加もできます。</p>' +
         '<div class="field" style="flex-direction:row; align-items:flex-start; gap:.5rem;"><input type="checkbox" id="nf-ask-about" style="width:auto; margin-top:.2rem;" ' + (f.askAbout !== false ? 'checked' : '') + '><label for="nf-ask-about" style="font-size:.85rem; color:var(--ink); letter-spacing:0;">参加者に「あなたについて」（出席者・記入者、グループ番号）を入力してもらう</label></div>' +
-        '<p class="hint" style="margin-top:-.5rem; margin-bottom:.9rem;">オフにすると、「参加者からの記録送信 ログポスト」に「あなたについて」欄が表示されなくなります。</p>' +
+        '<p class="hint" style="margin-top:-.5rem; margin-bottom:.9rem;">オフにすると、「参加者からの記録送信 Pop」に「あなたについて」欄が表示されなくなります。</p>' +
         '<button class="primary-btn" id="create-session-btn" style="width:100%;">記録帳を作成する</button>' +
       '</section>'
     );
@@ -2971,7 +3033,7 @@ var firebaseConfig = {
     }
     if (state.phase === 'no-db'){
       bannerSlot.innerHTML = '';
-      root.innerHTML = '<p class="state-msg">オンライン保存機能を利用できないため、この画面は使用できません。Claudeのアーティファクトとして開いた状態でご利用ください。</p>';
+      root.innerHTML = '<p class="state-msg">Firebaseへの接続に失敗しました。ファイル内のfirebaseConfigの値（セットアップ手順書を参照）が正しく設定されているかご確認ください。</p>';
       return;
     }
     if (state.phase === 'not-found'){
@@ -3538,7 +3600,7 @@ var firebaseConfig = {
     }
   }
   function applyModeChrome(){
-    document.getElementById('brand-mark').textContent = mode === 'manager' ? 'ワークショップ記録帳 Crop' : '参加者からの記録送信 ログポスト';
+    document.getElementById('brand-mark').textContent = mode === 'manager' ? 'ワークショップ記録帳 Crop' : '参加者からの記録送信 Pop';
     document.getElementById('brand-sub').textContent = mode === 'manager' ? 'MANAGER' : 'RECORD ENTRY';
     document.getElementById('app-root').className = 'app' + (mode === 'participant' ? ' p-mode' : '');
     document.getElementById('db-warn-slot').innerHTML = '';
@@ -3569,3 +3631,5 @@ var firebaseConfig = {
   if (mode === 'manager') Manager.boot(); else Participant.boot();
 })();
 </script>
+</body>
+</html>
