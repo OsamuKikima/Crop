@@ -1,10 +1,9 @@
 <title>ワークショップ記録帳 Crop</title>
-<meta name="description" content="ワークショップのフォルダを作成してQRコードを発行し、参加者は同じリンクから記録を入力。集まった記録から報告書とまとめスライドも作れる、ひとつにまとまった記録ツール。">
+<meta name="description" content="ワークショップのフォルダを作成してQRコードを発行し、参加者は同じリンクから記録を入力。集まった記録や概要情報をCSVで書き出せる、ひとつにまとまった記録ツール。">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Kosugi+Maru&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@500;600&display=swap">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/4.2.1/jspdf.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/pptxgenjs@4.0.1/dist/pptxgen.bundle.js"></script>
+<!-- AIによる報告書(PDF)・まとめスライド(PPTX)生成は行わないため、
+     jsPDF / html2canvas / PptxGenJS の読み込みは不要 -->
 <!-- Firebase SDK（compatバージョン。<script>タグでそのまま使えます） -->
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
@@ -395,7 +394,7 @@
      標準のダウンロード機能に置き換えている（この3つ以外のロジックは
      元アプリ(gijinote-unified.html)から変更していない）。
   ============================================================ */
-  var firebaseConfig = {
+var firebaseConfig = {
   apiKey: "AIzaSyBpegGmC8JH7svjZlhgGWxNoyIjTmIZzp0",
   authDomain: "crop-27ef5.firebaseapp.com",
   projectId: "crop-27ef5",
@@ -663,6 +662,14 @@
     var qs = 'session=' + encodeURIComponent(sessionId) + (groupId ? '&group=' + encodeURIComponent(groupId) : '');
     return CANONICAL_URL + '?' + qs + '#' + qs;
   }
+  // The general participant entry point — not scoped to any one folder.
+  // Opening this URL always lands on 「参加者からの記録送信 ログポスト」
+  // (the folder-picker screen participants start from), regardless of
+  // what mode this browser last used (see the `mode` URL param handling
+  // near the top of the file).
+  function participantEntryUrl(){
+    return CANONICAL_URL + '?mode=participant';
+  }
   function generateGroupName(index, total){
     if (total <= 26) return String.fromCharCode(65 + index);
     return String(index + 1);
@@ -730,7 +737,19 @@
     try{ return localStorage.getItem(MODE_KEY) === 'manager' ? 'manager' : 'participant'; }catch(e){ return 'participant'; }
   }
   function setStoredMode(m){ try{ localStorage.setItem(MODE_KEY, m); }catch(e){} }
-  var mode = getStoredMode();
+  // A URL like "...?mode=participant" (see participantEntryUrl() /
+  // viewSessions()'s QR code) always opens straight into that mode, no
+  // matter what this browser last used — this is what makes the manager's
+  // "参加者からの記録送信 ログポスト" link/QR reliable even on a device
+  // that was previously used in manager mode.
+  function modeFromUrl(){
+    try{
+      var m = new URLSearchParams(location.search).get('mode');
+      if (m === 'participant' || m === 'manager') return m;
+    }catch(e){}
+    return null;
+  }
+  var mode = modeFromUrl() || getStoredMode();
 
   /* ============================================================
      manager namespace
@@ -764,7 +783,7 @@
     sessionEditDraft: null,
     editingGroupId: null,
     groupEditDraft: null,
-    gen: { pdf:{busy:false,msg:'',cls:''}, pptx:{busy:false,msg:'',cls:''}, zip:{busy:false,msg:'',cls:''}, reflectionCsv:{busy:false,msg:'',cls:''} },
+    gen: { overviewCsv:{busy:false,msg:'',cls:''}, zip:{busy:false,msg:'',cls:''}, reflectionCsv:{busy:false,msg:'',cls:''} },
     // --- manager login/registration ---
     authAccount: null,   // {id, email} once logged in; null while gated
     authPhase: 'checking', // checking | setup | login | forgot | resetCodeShown | null(=authed)
@@ -1224,6 +1243,19 @@
         '<button class="auth-switch-link" id="goto-admins-btn" type="button">管理者アカウント</button>' +
         '<button class="auth-switch-link" id="manager-logout-btn2" type="button">ログアウト</button>' +
       '</p>' +
+      '<section class="block">' +
+        '<h2 style="margin-top:0;">参加者からの記録送信 ログポスト</h2>' +
+        '<p class="hint" style="margin-top:0;">このリンク・QRコードを開くと、端末が以前どちらのモードで使われていたかに関わらず、参加者がフォルダを選ぶ画面（参加者からの記録送信 ログポスト）に直接アクセスできます。会場の入り口などに掲示・配布してください。</p>' +
+        '<details style="margin-top:.6rem;"><summary class="hint" style="cursor:pointer;">QRコード・リンクを表示</summary>' +
+          '<div class="qr-wrap" style="margin-top:.6rem;">' +
+            '<div id="participant-entry-qr-holder"></div>' +
+            '<div class="qr-side">' +
+              '<p class="hint" style="margin-top:0;">このQRコードを読み取ると、参加者からの記録送信 ログポストが直接開きます。</p>' +
+              '<div class="link-row"><input type="text" readonly id="participant-entry-link-text" value="' + esc(participantEntryUrl()) + '"><button class="btn-sm" id="copy-participant-entry-link-btn">リンクをコピー</button></div>' +
+            '</div>' +
+          '</div>' +
+        '</details>' +
+      '</section>' +
       (state.sessions.length ?
         state.sessions.map(function(s){
           return '<div class="s-card" data-open="' + s.id + '">' +
@@ -1262,7 +1294,7 @@
         '<div class="field"><label for="nf-sections">記録する問いの数</label>' + countSelectHtml('nf-sections', f.sectionCount, 20, 'なし', '') + '</div>' +
         '<p class="hint" style="margin-top:-.5rem; margin-bottom:.9rem;">ワークショップが複数の問い(進行フェーズ)に分かれる場合は数を選んでください。進行中に管理画面から次の問いへ進められ、あとから追加もできます。</p>' +
         '<div class="field" style="flex-direction:row; align-items:flex-start; gap:.5rem;"><input type="checkbox" id="nf-ask-about" style="width:auto; margin-top:.2rem;" ' + (f.askAbout !== false ? 'checked' : '') + '><label for="nf-ask-about" style="font-size:.85rem; color:var(--ink); letter-spacing:0;">参加者に「あなたについて」（出席者・記入者、グループ番号）を入力してもらう</label></div>' +
-        '<p class="hint" style="margin-top:-.5rem; margin-bottom:.9rem;">オフにすると、グループごとの記録帳に「あなたについて」欄が表示されなくなります。</p>' +
+        '<p class="hint" style="margin-top:-.5rem; margin-bottom:.9rem;">オフにすると、「参加者からの記録送信 ログポスト」に「あなたについて」欄が表示されなくなります。</p>' +
         '<button class="primary-btn" id="create-session-btn" style="width:100%;">記録帳を作成する</button>' +
       '</section>'
     );
@@ -1335,23 +1367,16 @@
 
       reflectionResponsesSectionHtml() +
 
-      ((entries.length || state.reflectionResponses.length) ? (
+      (
         '<section class="block">' +
           '<h2>出力</h2>' +
+          '<p class="hint" style="margin-top:-.3rem; margin-bottom:.9rem;">フォルダの概要情報（件名・日時・参加者人数・業界業種・グループ／問い別の記録件数など）をCSVで保存できます。</p>' +
+          '<button class="gen-btn zip" id="gen-overview-csv" ' + (state.gen.overviewCsv.busy?'disabled':'') + '>' +
+            (state.gen.overviewCsv.busy ? '<span class="spin"></span>' : '🗂') + ' 概要情報を保存（CSV）' +
+          '</button>' +
+          '<div class="gen-status ' + state.gen.overviewCsv.cls + '">' + esc(state.gen.overviewCsv.msg) + '</div>' +
+          (!downloadsApi ? '<p class="hint">※ この表示ではファイルの保存を利用できません。</p>' : '') +
           (entries.length ? (
-            '<p class="hint" style="margin-top:-.3rem; margin-bottom:.9rem;">チェックした記録から、Claudeが内容を整理して報告書とまとめスライドを作成します。</p>' +
-            '<button class="gen-btn pdf" id="gen-pdf" ' + (state.gen.pdf.busy || !selCount ?'disabled':'') + '>' +
-              (state.gen.pdf.busy ? '<span class="spin"></span>' : '📄') + ' 報告書を作成（PDF）' +
-            '</button>' +
-            '<div class="gen-status ' + state.gen.pdf.cls + '">' + esc(state.gen.pdf.msg) + '</div>' +
-            '<button class="gen-btn pptx" id="gen-pptx" ' + (state.gen.pptx.busy || !selCount ?'disabled':'') + '>' +
-              (state.gen.pptx.busy ? '<span class="spin"></span>' : '📊') + ' 1枚まとめスライドを作成（PPTX）' +
-            '</button>' +
-            '<div class="gen-status ' + state.gen.pptx.cls + '">' + esc(state.gen.pptx.msg) + '</div>' +
-            (!selCount ? '<p class="hint">記録を1件以上選択してください。</p>' : '') +
-            (!sampleApi ? '<p class="hint">※ この表示ではAIによる内容整理を利用できません。</p>' : '') +
-            (!downloadsApi ? '<p class="hint">※ この表示ではファイルの保存を利用できません。</p>' : '') +
-            (state.reflectionResponses.length ? '<p class="hint">※「全体のふりかえり」に回答が集まっている場合、報告書とスライドにはその内容も自動的に組み込まれます。</p>' : '') +
             '<hr style="border:none; border-top:1px solid var(--line); margin:1rem 0;">' +
             '<p class="hint" style="margin-top:0; margin-bottom:.9rem;">チェックした記録そのものを、CSVファイルと写真として保存できます（ZIPフォルダとしてまとめることはできないため、CSV1件・写真は1枚ずつ、続けて保存の確認が表示されます。写真のファイル名はCSVの「写真ファイル」欄と対応しています）。</p>' +
             '<button class="gen-btn zip" id="gen-zip" ' + (state.gen.zip.busy || !selCount ?'disabled':'') + '>' +
@@ -1360,9 +1385,9 @@
             '<div class="gen-status ' + state.gen.zip.cls + '">' + esc(state.gen.zip.msg) + '</div>' +
             (!selCount ? '<p class="hint">記録を1件以上選択してください。</p>' : '') +
             (!downloadsApi ? '<p class="hint">※ この表示ではファイルの保存を利用できません。</p>' : '')
-          ) : '<p class="hint" style="margin-top:-.3rem;">記録がまだないため、報告書・記録データの出力はできません。</p>') +
+          ) : '<p class="hint" style="margin-top:.6rem;">記録がまだないため、記録データの出力はできません。</p>') +
           (state.reflectionResponses.length ? (
-            (entries.length ? '<hr style="border:none; border-top:1px solid var(--line); margin:1rem 0;">' : '') +
+            '<hr style="border:none; border-top:1px solid var(--line); margin:1rem 0;">' +
             '<p class="hint" style="margin-top:0; margin-bottom:.9rem;">「全体のふりかえり」に集まった回答だけを、1つのCSVファイルにまとめて保存できます。</p>' +
             '<button class="gen-btn zip" id="gen-reflection-csv" ' + (state.gen.reflectionCsv.busy?'disabled':'') + '>' +
               (state.gen.reflectionCsv.busy ? '<span class="spin"></span>' : '📝') + ' ふりかえり回答を保存（CSV）' +
@@ -1371,7 +1396,7 @@
             (!downloadsApi ? '<p class="hint">※ この表示ではファイルの保存を利用できません。</p>' : '')
           ) : '') +
         '</section>'
-      ) : '') +
+      ) +
 
       '<button class="btn-sm danger" id="delete-session-btn">このフォルダを削除する</button>'
     );
@@ -1687,6 +1712,15 @@
       if (gotoAdminsBtn) gotoAdminsBtn.addEventListener('click', openAdmins);
       var logoutBtn2 = document.getElementById('manager-logout-btn2');
       if (logoutBtn2) logoutBtn2.addEventListener('click', managerLogout);
+
+      renderParticipantEntryQr();
+      var copyEntryBtn = document.getElementById('copy-participant-entry-link-btn');
+      if (copyEntryBtn) copyEntryBtn.addEventListener('click', async function(){
+        var input = document.getElementById('participant-entry-link-text');
+        input.focus(); input.select();
+        try{ await navigator.clipboard.writeText(input.value); toast('リンクをコピーしました'); }
+        catch(e){ toast('コピーできませんでした。テキストを選択してコピーしてください'); }
+      });
     }
 
     if (state.view === 'admins'){
@@ -2076,10 +2110,8 @@
         });
       });
 
-      var genPdf = document.getElementById('gen-pdf');
-      if (genPdf) genPdf.addEventListener('click', function(){ generateReport('pdf'); });
-      var genPptx = document.getElementById('gen-pptx');
-      if (genPptx) genPptx.addEventListener('click', function(){ generateReport('pptx'); });
+      var genOverviewCsv = document.getElementById('gen-overview-csv');
+      if (genOverviewCsv) genOverviewCsv.addEventListener('click', generateOverviewCsvExport);
       var genZip = document.getElementById('gen-zip');
       if (genZip) genZip.addEventListener('click', generateDataExport);
       var genReflectionCsv = document.getElementById('gen-reflection-csv');
@@ -2100,6 +2132,14 @@
     holder.innerHTML = '';
     try{
       new QRCode(holder, { text: linkFor(state.currentId), width:180, height:180, colorDark:'#20242b', colorLight:'#ffffff' });
+    }catch(e){ console.warn('QR render failed', e); holder.innerHTML = '<p class="hint">QRコードを表示できませんでした</p>'; }
+  }
+  function renderParticipantEntryQr(){
+    var holder = document.getElementById('participant-entry-qr-holder');
+    if (!holder || typeof QRCode === 'undefined') return;
+    holder.innerHTML = '';
+    try{
+      new QRCode(holder, { text: participantEntryUrl(), width:180, height:180, colorDark:'#20242b', colorLight:'#ffffff' });
     }catch(e){ console.warn('QR render failed', e); holder.innerHTML = '<p class="hint">QRコードを表示できませんでした</p>'; }
   }
 
@@ -2402,350 +2442,6 @@
     if (state.view === 'detail') render();
   }
 
-  function sampleErrorMessage(e){
-    var hideForever = ['not_granted','sampling_disabled','not_declared','capability_disabled','capability_removed'];
-    if (hideForever.indexOf(e.code) !== -1) return 'この表示ではAI機能を利用できません。';
-    if (e.code === 'rate_limited') return '混み合っています。しばらくしてからもう一度お試しください。';
-    if (e.code === 'session_expired') return 'サインインの有効期限が切れました。再度お試しください。';
-    if (e.code === 'invalid_json') return 'うまく整理できませんでした。もう一度お試しください。';
-    if (e.code === 'refused') return '内容を処理できませんでした。入力内容をご確認ください。';
-    if (e.code === 'prompt_too_large') return '記録が多すぎます。選択する記録を減らしてください。';
-    return '一時的なエラーが発生しました。もう一度お試しください。';
-  }
-
-  // Score averages are computed here in plain JS from the raw numeric
-  // answers rather than asked of the AI, so the numbers in the report are
-  // never at risk of being mis-transcribed or rounded oddly by the model —
-  // only the free-text answers (via reflectionSummary below) go through
-  // AI summarization.
-  function computeReflectionStats(responses, cfg){
-    var scoreStats = cfg.questions.filter(function(q){ return q.type === 'score'; }).map(function(q){
-      var vals = responses.map(function(r){ return (r.answers||{})[q.id]; }).filter(function(v){ return typeof v === 'number' && !isNaN(v); });
-      var avg = vals.length ? (vals.reduce(function(a,b){ return a+b; },0) / vals.length) : null;
-      return {label:q.label, scoreMax:q.scoreMax||5, avg:avg, count:vals.length};
-    });
-    var textStats = cfg.questions.filter(function(q){ return q.type !== 'score'; }).map(function(q){
-      var texts = responses.map(function(r){ return (r.answers||{})[q.id]; }).filter(Boolean);
-      return {label:q.label, texts:texts};
-    });
-    return {scoreStats:scoreStats, textStats:textStats, responseCount:responses.length};
-  }
-
-  async function fetchAllReflectionResponses(){
-    try{
-      var qs = await dbApi.collection('sessions/'+state.currentId+'/reflectionResponses').get();
-      return qs.docs.map(function(d){ var data=Object.assign({}, d.data()||{}, {id:d.id}); return data; });
-    }catch(e){ console.warn('reflection fetch failed', e); return []; }
-  }
-
-  async function buildStructured(session, entries, reflection){
-    var header =
-      '以下は、あるフォルダ(会議・打ち合わせ)に集まった複数人の音声記録の書き起こしです。この内容から、報告書とまとめスライドを作るための構造化データをJSONで1つだけ出力してください。説明文や前置き、コードフェンスは一切不要です。JSONのみを出力してください。\n' +
-      'フォルダの件名: ' + (session.title||'') + '\n日付: ' + (session.dateISO||'') +
-      (session.purpose ? '\nワークショップのねらい: ' + session.purpose : '') +
-      (session.location ? '\n実施場所: ' + session.location : '') +
-      (session.participants ? '\n参加対象者: ' + session.participants : '') +
-      (session.participantCount ? '\nおおよその参加者人数: ' + session.participantCount : '') +
-      (session.industry ? '\n対象となる業界・業種: ' + session.industry : '') +
-      '\n\n' +
-      '出力形式:\n' +
-      '{"summary": string, "agendaItems": string[], "decisions": string[], "actionItems": [{"task": string, "owner": string, "due": string}], "keyPoints": string[], "reflectionSummary": string}\n' +
-      '条件:\n' +
-      '- summary: 2〜4文の要約\n' +
-      '- agendaItems: 話し合われた議題・トピックの箇条書き（最大8件）\n' +
-      '- decisions: 決定事項の箇条書き（なければ空配列）\n' +
-      '- actionItems: ネクストアクション。担当者/期限が読み取れない場合は空文字（最大8件）\n' +
-      '- keyPoints: 1枚スライド用の最重要ポイントを3〜5件、それぞれ20字前後の短文で\n' +
-      '- reflectionSummary: 下部に「事後アンケートの自由記述回答」がある場合のみ、その傾向を2〜4文で要約してください（記載がなければ空文字のままにしてください）\n\n' +
-      '---\n';
-    var body = '';
-    entries.forEach(function(e){
-      body += '■ 出席者:' + (e.attendees||'不明') + (e.groupNumber?' / グループ:'+e.groupNumber:'') + (e.section?' / 問い:'+e.section:'') + '\n' +
-              (e.transcript || '(書き起こしなし)') + '\n\n';
-    });
-    if (reflection && reflection.stats && reflection.stats.textStats.some(function(t){ return t.texts.length; })){
-      body += '---\n事後アンケートの自由記述回答:\n';
-      reflection.stats.textStats.forEach(function(t){
-        if (!t.texts.length) return;
-        body += '■ 設問: ' + t.label + '\n';
-        t.texts.forEach(function(tx){ body += '- ' + tx + '\n'; });
-      });
-    }
-    body = trimToUtf8Bytes(body, 42000);
-    var prompt = header + body;
-    var data = await sampleApi.json(prompt, {modelTier:'default', cache:false});
-    var attendees = Array.from(new Set(entries.map(function(e){return (e.attendees||'').trim();}).filter(Boolean))).join(', ');
-    return {
-      title: session.title || '記録',
-      dateISO: session.dateISO || todayISO(),
-      dateLabel: formatDateLabel(session.dateISO),
-      attendees: attendees,
-      purpose: session.purpose || '',
-      location: session.location || '',
-      participants: session.participants || '',
-      participantCount: session.participantCount || '',
-      industry: session.industry || '',
-      summary: (data && data.summary) || '',
-      agendaItems: (data && Array.isArray(data.agendaItems)) ? data.agendaItems : [],
-      decisions: (data && Array.isArray(data.decisions)) ? data.decisions : [],
-      actionItems: (data && Array.isArray(data.actionItems)) ? data.actionItems : [],
-      keyPoints: (data && Array.isArray(data.keyPoints)) ? data.keyPoints : [],
-      reflectionSummary: (data && data.reflectionSummary) || '',
-      reflectionStats: reflection ? reflection.stats : null
-    };
-  }
-
-  async function collectPhotos(entries){
-    var out = [];
-    for (var i=0;i<entries.length;i++){
-      var photos = state.entryPhotos[entries[i].id] || await fetchEntryPhotos(entries[i].id);
-      photos.forEach(function(p){ out.push(p); });
-    }
-    return out;
-  }
-
-  async function generateReport(kind){
-    var selected = state.entries.filter(function(e){ return state.selected.has(e.id); });
-    if (!selected.length) return;
-    if (!sampleApi){ setGen(kind,false,'この表示ではAI機能を利用できません。','err'); return; }
-    if (!downloadsApi){ setGen(kind,false,'この表示ではファイルの保存を利用できません。','err'); return; }
-
-    setGen(kind, true, 'Claudeが内容を整理しています…', '');
-    try{
-      var cfg = getReflectionConfig(state.currentSession);
-      var reflection = null;
-      if (cfg.questions.length){
-        var responses = state.reflectionResponses.length ? state.reflectionResponses : await fetchAllReflectionResponses();
-        if (responses.length) reflection = {cfg:cfg, responses:responses, stats: computeReflectionStats(responses, cfg)};
-      }
-      var structured = await buildStructured(state.currentSession, selected, reflection);
-      setGen(kind, true, 'ファイルを作成しています…', '');
-      var photos = await collectPhotos(selected);
-
-      if (kind === 'pdf') await buildAndSavePdf(selected, structured, photos);
-      else await buildAndSavePptx(selected, structured, photos);
-
-      setGen(kind, false, '✓ 保存しました', 'ok');
-    }catch(err){
-      console.error(err);
-      var msg = (err && err.code) ? sampleErrorMessage(err) : 'ファイルの作成に失敗しました。もう一度お試しください。';
-      setGen(kind, false, msg, 'err');
-    }
-  }
-
-  function waitFontsAndImages(container){
-    var imgs = Array.prototype.slice.call(container.querySelectorAll('img'));
-    var imgPromises = imgs.map(function(img){
-      if (img.complete) return Promise.resolve();
-      return new Promise(function(res){ img.onload = img.onerror = res; });
-    });
-    var fontsReady = (document.fonts && document.fonts.ready) ? document.fonts.ready : Promise.resolve();
-    return Promise.all([fontsReady].concat(imgPromises));
-  }
-
-  function reportHtml(entries, s, photos){
-    var esc_ = esc;
-    var html = '';
-    html += '<div style="font-family:\'Zen Kaku Gothic New\',sans-serif; color:#20242b; padding:56px 52px; width:794px; border-top:8px solid #1e6fea;">';
-    html += '<div style="font-family:\'Kosugi Maru\',sans-serif; font-size:11px; letter-spacing:.2em; color:#8b8f99; margin-top:8px;">WORKSHOP REPORT</div>';
-    html += '<h1 style="font-family:\'Kosugi Maru\',sans-serif; font-size:30px; margin:6px 0 18px; font-weight:800; color:#124fb0;">' + esc_(s.title) + '</h1>';
-    html += '<div style="display:flex; flex-wrap:wrap; gap:6px 18px; font-size:13px; color:#585f6b; border-top:1px solid #e3dac2; border-bottom:1px solid #e3dac2; padding:10px 0; margin-bottom:22px;">';
-    html += '<div><b>日付</b>　' + esc_(s.dateLabel||'—') + '</div>';
-    html += '<div><b>出席者</b>　' + esc_(s.attendees||'—') + '</div>';
-    if (s.location) html += '<div><b>実施場所</b>　' + esc_(s.location) + '</div>';
-    if (s.participants) html += '<div><b>参加対象者</b>　' + esc_(s.participants) + '</div>';
-    if (s.participantCount) html += '<div><b>参加者人数</b>　' + esc_(s.participantCount) + '</div>';
-    if (s.industry) html += '<div><b>業界・業種</b>　' + esc_(s.industry) + '</div>';
-    html += '</div>';
-    if (s.purpose){
-      html += '<h2 style="font-family:\'Kosugi Maru\',sans-serif; font-size:16px; margin:0 0 8px;">ワークショップのねらい</h2>';
-      html += '<p style="font-size:13.5px; line-height:1.9; margin:0 0 22px;">' + nl2br(s.purpose) + '</p>';
-    }
-    if (s.summary){
-      html += '<h2 style="font-family:\'Kosugi Maru\',sans-serif; font-size:16px; margin:0 0 8px;">概要</h2>';
-      html += '<p style="font-size:13.5px; line-height:1.9; margin:0 0 22px;">' + nl2br(s.summary) + '</p>';
-    }
-    function listSection(title, items){
-      if (!items || !items.length) return '';
-      var h = '<h2 style="font-family:\'Kosugi Maru\',sans-serif; font-size:16px; margin:0 0 8px;">' + esc_(title) + '</h2>';
-      h += '<ul style="margin:0 0 22px; padding-left:20px; font-size:13.5px; line-height:1.9;">';
-      items.forEach(function(it){ h += '<li>' + esc_(it) + '</li>'; });
-      h += '</ul>';
-      return h;
-    }
-    html += listSection('議題・話し合われた内容', s.agendaItems);
-    html += listSection('決定事項', s.decisions);
-    if (s.actionItems && s.actionItems.length){
-      html += '<h2 style="font-family:\'Kosugi Maru\',sans-serif; font-size:16px; margin:0 0 8px;">ネクストアクション</h2>';
-      html += '<table style="width:100%; border-collapse:collapse; font-size:13px; margin-bottom:22px;">';
-      html += '<tr style="border-bottom:1px solid #e3dac2; color:#585f6b; text-align:left;"><th style="padding:5px 8px 5px 0;">タスク</th><th style="padding:5px 8px;width:110px;">担当</th><th style="padding:5px 0 5px 8px;width:100px;">期限</th></tr>';
-      s.actionItems.forEach(function(a){
-        html += '<tr style="border-bottom:1px solid #efe6d2;"><td style="padding:7px 8px 7px 0;">' + esc_(a.task||'') + '</td><td style="padding:7px 8px;">' + esc_(a.owner||'—') + '</td><td style="padding:7px 0 7px 8px;">' + esc_(a.due||'—') + '</td></tr>';
-      });
-      html += '</table>';
-    }
-
-    if (s.reflectionStats && (s.reflectionSummary || s.reflectionStats.scoreStats.length || s.reflectionStats.responseCount)){
-      html += '<div style="margin-top:10px;">';
-      html += '<h2 style="font-family:\'Kosugi Maru\',sans-serif; font-size:16px; margin:0 0 8px;">全体のふりかえり（事後アンケート）</h2>';
-      html += '<p style="font-size:12px; color:#8b8f99; margin:0 0 10px;">回答数: ' + s.reflectionStats.responseCount + ' 件</p>';
-      if (s.reflectionSummary){
-        html += '<p style="font-size:13.5px; line-height:1.9; margin:0 0 14px;">' + nl2br(s.reflectionSummary) + '</p>';
-      }
-      if (s.reflectionStats.scoreStats.length){
-        html += '<table style="width:100%; border-collapse:collapse; font-size:13px; margin-bottom:14px;">';
-        html += '<tr style="border-bottom:1px solid #e3dac2; color:#585f6b; text-align:left;"><th style="padding:5px 8px 5px 0;">設問</th><th style="padding:5px 0 5px 8px; width:150px;">平均点</th></tr>';
-        s.reflectionStats.scoreStats.forEach(function(q){
-          html += '<tr style="border-bottom:1px solid #efe6d2;"><td style="padding:7px 8px 7px 0;">' + esc_(q.label) + '</td><td style="padding:7px 0 7px 8px;">' +
-            (q.avg!=null ? q.avg.toFixed(1) + ' / ' + q.scoreMax + '（' + q.count + '件）' : '回答なし') + '</td></tr>';
-        });
-        html += '</table>';
-      }
-      html += '</div>';
-    }
-
-    var groupBuckets = new Map();
-    entries.forEach(function(e){
-      var key = (e.groupNumber||'').trim();
-      if (!groupBuckets.has(key)) groupBuckets.set(key, []);
-      groupBuckets.get(key).push(e);
-    });
-    var multiGroup = groupBuckets.size > 1;
-    groupBuckets.forEach(function(list, key){
-      if (multiGroup){
-        var sw = swatchForGroupName(key) || 'var(--line-strong)';
-        html += '<div style="margin-top:30px;"><h2 style="font-family:\'Kosugi Maru\',sans-serif; font-size:17px; margin:0 0 4px; color:#124fb0;">' +
-          '<span style="display:inline-block; width:11px; height:11px; border-radius:3px; background:' + sw + '; vertical-align:middle; margin-right:7px;"></span>' +
-          'グループ: ' + esc_(key||'未分類') + '</h2></div>';
-      }
-      list.forEach(function(e){
-        var tagParts = [];
-        if (!multiGroup && e.groupNumber) tagParts.push('グループ ' + e.groupNumber);
-        if (e.section) tagParts.push(e.section);
-        var tagStr = tagParts.length ? '（' + tagParts.join('・') + '）' : '';
-        html += '<div style="margin-top:' + (multiGroup?'14px':'26px') + '; padding-top:14px; border-top:1px dashed #d2c6a3;">';
-        html += '<h2 style="font-family:\'Kosugi Maru\',sans-serif; font-size:15px; margin:0 0 4px;">記録: ' + esc_(e.attendees||'記入者不明') + esc_(tagStr) + '</h2>';
-        html += '<p style="font-size:12.5px; line-height:1.85; color:#282c33; white-space:pre-wrap;">' + esc_(e.transcript || '（書き起こしなし）') + '</p>';
-        html += '</div>';
-      });
-    });
-
-    if (photos.length){
-      html += '<div style="margin-top:28px; padding-top:14px; border-top:1px dashed #d2c6a3;">';
-      html += '<h2 style="font-family:\'Kosugi Maru\',sans-serif; font-size:16px; margin:0 0 12px;">写真記録</h2>';
-      html += '<div style="display:grid; grid-template-columns:repeat(2,1fr); gap:12px;">';
-      photos.forEach(function(p){
-        html += '<div style="border:1px solid #e3dac2; border-radius:6px; overflow:hidden;"><img src="' + p.dataUrl + '" style="width:100%; display:block;"></div>';
-      });
-      html += '</div></div>';
-    }
-
-    html += '<div style="margin-top:30px; font-size:10.5px; color:#8b8f99;">ワークショップ記録帳 Crop で作成 ・ ' + esc_(new Date().toLocaleString('ja-JP')) + '</div>';
-    html += '</div>';
-    return html;
-  }
-
-  async function buildAndSavePdf(entries, s, photos){
-    var holder = el('<div id="pdf-src-active"></div>');
-    holder.style.position='fixed'; holder.style.left='-9999px'; holder.style.top='0'; holder.style.width='794px'; holder.style.background='#faf6ec';
-    holder.innerHTML = reportHtml(entries, s, photos);
-    document.body.appendChild(holder);
-    try{
-      await waitFontsAndImages(holder);
-      await new Promise(function(r){ setTimeout(r, 60); });
-      var canvas = await html2canvas(holder, {scale:1.6, backgroundColor:'#faf6ec', useCORS:true});
-      var pageWmm = 210, pageHmm = 297;
-      var pxPerMm = canvas.width / pageWmm;
-      var pageHpx = Math.floor(pageHmm * pxPerMm);
-      var totalHpx = canvas.height;
-      var { jsPDF } = window.jspdf;
-      var pdf = new jsPDF({unit:'mm', format:'a4'});
-      var offset = 0, first = true;
-      while (offset < totalHpx){
-        var sliceH = Math.min(pageHpx, totalHpx - offset);
-        var pageCanvas = document.createElement('canvas');
-        pageCanvas.width = canvas.width; pageCanvas.height = sliceH;
-        var ctx = pageCanvas.getContext('2d');
-        ctx.fillStyle = '#faf6ec'; ctx.fillRect(0,0,pageCanvas.width,pageCanvas.height);
-        ctx.drawImage(canvas, 0, offset, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
-        var imgData = pageCanvas.toDataURL('image/jpeg', 0.88);
-        if (!first) pdf.addPage();
-        pdf.addImage(imgData, 'JPEG', 0, 0, pageWmm, sliceH / pxPerMm);
-        first = false;
-        offset += sliceH;
-      }
-      var blob = pdf.output('blob');
-      var fname = '報告書_' + (s.dateISO||todayISO()).replace(/[\\/:*?"<>|]/g,'') + '.pdf';
-      await downloadsApi.save({filename: fname, data: blob});
-    } finally {
-      document.body.removeChild(holder);
-    }
-  }
-
-  async function buildAndSavePptx(entries, s, photos){
-    var pptx = new PptxGenJS();
-    pptx.defineLayout({name:'WIDE', width:13.33, height:7.5});
-    pptx.layout = 'WIDE';
-    var slide = pptx.addSlide();
-    var PAPER = 'FAF6EC', INK = '20242B', SOFT = '585F6B', ACCENT = '21A366', BLUE = '1E6FEA', LINE='E3DAC2';
-    slide.background = {color: PAPER};
-
-    ['E8482E','1E6FEA','FFC53D','21A366'].forEach(function(c, i){
-      slide.addShape('rect', {x: i*(13.33/4), y:0, w:13.33/4, h:0.12, fill:{color:c}, line:{type:'none'}});
-    });
-
-    slide.addText(s.title, {
-      x:0.5, y:0.35, w:12.3, h:0.9, fontFace:'Yu Gothic', fontSize:28, bold:true, color:INK
-    });
-    slide.addText(
-      [
-        s.dateLabel ? '日付: '+s.dateLabel : '',
-        s.attendees ? '出席: '+s.attendees : '',
-        s.location ? '場所: '+s.location : '',
-        s.participants ? '対象: '+s.participants : '',
-        s.participantCount ? '人数: '+s.participantCount : '',
-        s.industry ? '業界・業種: '+s.industry : ''
-      ].filter(Boolean).join('　　'),
-      {x:0.5, y:1.05, w:12.3, h:0.4, fontFace:'Yu Gothic', fontSize:13, color:SOFT}
-    );
-    slide.addShape('line', {x:0.5, y:1.5, w:12.3, h:0, line:{color:BLUE, width:1.5}});
-
-    var bullets = [];
-    if (s.summary) bullets.push({text:s.summary, options:{bullet:false, fontSize:13.5, color:INK, breakLine:true, paraSpaceAfter:10}});
-    (s.keyPoints||[]).forEach(function(t){ bullets.push({text:t, options:{bullet:{code:'25A0'}, fontSize:13, color:INK, breakLine:true, paraSpaceAfter:6}}); });
-    (s.decisions||[]).slice(0,4).forEach(function(t){ bullets.push({text:'決定: '+t, options:{bullet:{code:'2713'}, fontSize:13, color:ACCENT, bold:true, breakLine:true, paraSpaceAfter:6}}); });
-    (s.actionItems||[]).slice(0,4).forEach(function(a){
-      var t = a.task + (a.owner? '（'+a.owner+(a.due?' / '+a.due:'')+'）' : '');
-      bullets.push({text:t, options:{bullet:{code:'2192'}, fontSize:12.5, color:SOFT, breakLine:true, paraSpaceAfter:5}});
-    });
-    if (s.reflectionSummary) bullets.push({text:'ふりかえり: '+s.reflectionSummary, options:{bullet:{code:'2606'}, fontSize:12.5, color:SOFT, italic:true, breakLine:true, paraSpaceAfter:5}});
-    if (!bullets.length) bullets.push({text:'（内容なし）', options:{fontSize:13, color:SOFT}});
-
-    var hasPhotos = photos && photos.length;
-    var textW = hasPhotos ? 7.6 : 12.3;
-    slide.addText(bullets, {x:0.5, y:1.75, w:textW, h:5.3, fontFace:'Yu Gothic', valign:'top'});
-
-    if (hasPhotos){
-      var grid = photos.slice(0,4);
-      var gx = 8.35, gy = 1.75, gw = 4.5, gap = 0.15;
-      var cols = grid.length > 1 ? 2 : 1;
-      var cellW = (gw - gap*(cols-1)) / cols;
-      var cellH = cellW * 0.72;
-      grid.forEach(function(p, i){
-        var col = i % cols, row = Math.floor(i/cols);
-        slide.addImage({data:p.dataUrl, x: gx + col*(cellW+gap), y: gy + row*(cellH+gap), w:cellW, h:cellH, sizing:{type:'cover', w:cellW, h:cellH}});
-      });
-    }
-
-    slide.addText('ワークショップ記録帳 Crop で作成 ・ ' + new Date().toLocaleDateString('ja-JP'), {
-      x:0.5, y:7.05, w:10, h:0.35, fontFace:'Yu Gothic', fontSize:9, color:SOFT
-    });
-
-    var blob = await pptx.write({outputType:'blob'});
-    var fname = 'まとめスライド_' + (s.dateISO||todayISO()).replace(/[\\/:*?"<>|]/g,'') + '.pptx';
-    await downloadsApi.save({filename: fname, data: blob});
-  }
-
   /* ============================================================
      raw data export (CSV + photos) — unlike the PDF/PPTX buttons
      above this needs no AI summarization, just the entries and
@@ -2876,6 +2572,69 @@
     }catch(err){
       console.error(err);
       setGen('reflectionCsv', false, downloadsErrorMessage(err), 'err');
+    }
+  }
+
+  // フォルダの概要情報（AIによる報告書の代わりに、生の集計値だけをCSVで
+  // 書き出す）。選択状態や記録の有無に関わらず、フォルダを開けばいつでも
+  // 保存できる。
+  async function generateOverviewCsvExport(){
+    var s = state.currentSession || {};
+    if (!downloadsApi){ setGen('overviewCsv', false, 'この表示ではファイルの保存を利用できません。', 'err'); return; }
+    setGen('overviewCsv', true, 'CSVを準備しています…', '');
+    try{
+      var entries = state.entries;
+      var groupCounts = {};
+      entries.forEach(function(e){
+        var gn = (e.groupNumber||'').trim();
+        if (gn) groupCounts[gn] = (groupCounts[gn]||0) + 1;
+      });
+      var sectionCounts = {};
+      entries.forEach(function(e){
+        var sn = (e.section||'').trim();
+        if (sn) sectionCounts[sn] = (sectionCounts[sn]||0) + 1;
+      });
+
+      var rows = [];
+      rows.push(['項目','値']);
+      rows.push(['件名', s.title || '']);
+      rows.push(['日付', formatDateLabel(s.dateISO) || s.dateISO || '']);
+      rows.push(['実施場所', s.location || '']);
+      rows.push(['参加対象者', s.participants || '']);
+      rows.push(['おおよその参加者人数', s.participantCount || '']);
+      rows.push(['対象となる業界・業種', s.industry || '']);
+      rows.push(['ワークショップのねらい', s.purpose || '']);
+      rows.push(['グループ数', String(state.groups.length)]);
+      rows.push(['問いの数', String(state.sections.length)]);
+      rows.push(['記録件数（合計）', String(entries.length)]);
+      rows.push(['ふりかえり回答数', String(state.reflectionResponses.length)]);
+      rows.push(['出力日時', new Date().toLocaleString('ja-JP')]);
+
+      if (state.groups.length){
+        rows.push([]);
+        rows.push(['グループ別 記録件数']);
+        rows.push(['グループ名','件数']);
+        state.groups.forEach(function(g){
+          rows.push([g.name, String(groupCounts[g.name]||0)]);
+        });
+      }
+
+      if (state.sections.length){
+        rows.push([]);
+        rows.push(['問い別 記録件数']);
+        rows.push(['問い','件数']);
+        state.sections.forEach(function(sec){
+          rows.push([sec.name, String(sectionCounts[sec.name]||0)]);
+        });
+      }
+
+      var csvText = rows.map(function(r){ return r.map(csvCell).join(','); }).join('\r\n');
+      var stamp = (s.dateISO||todayISO()).replace(/[\\/:*?"<>|]/g,'');
+      await downloadsApi.save({filename: 'フォルダ概要_' + stamp + '.csv', data: '﻿' + csvText});
+      setGen('overviewCsv', false, '✓ 保存しました', 'ok');
+    }catch(err){
+      console.error(err);
+      setGen('overviewCsv', false, downloadsErrorMessage(err), 'err');
     }
   }
 
@@ -3779,7 +3538,7 @@
     }
   }
   function applyModeChrome(){
-    document.getElementById('brand-mark').textContent = mode === 'manager' ? 'ワークショップ記録帳 Crop' : 'グループごとの記録帳';
+    document.getElementById('brand-mark').textContent = mode === 'manager' ? 'ワークショップ記録帳 Crop' : '参加者からの記録送信 ログポスト';
     document.getElementById('brand-sub').textContent = mode === 'manager' ? 'MANAGER' : 'RECORD ENTRY';
     document.getElementById('app-root').className = 'app' + (mode === 'participant' ? ' p-mode' : '');
     document.getElementById('db-warn-slot').innerHTML = '';
