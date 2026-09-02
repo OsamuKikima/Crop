@@ -396,13 +396,13 @@
      元アプリ(gijinote-unified.html)から変更していない）。
   ============================================================ */
   var firebaseConfig = {
-    apiKey: "AIzaSyBpegGmC8JH7svjZlhgGWxNoyIjTmIZzp0",
-    authDomain: "crop-27ef5.firebaseapp.com",
-    projectId: "crop-27ef5",
-    storageBucket: "crop-27ef5.firebasestorage.app",
-    messagingSenderId: "787923806496",
-    appId: "1:787923806496:web:aa8faf6b596ad014448f45"
-  };
+  apiKey: "AIzaSyBpegGmC8JH7svjZlhgGWxNoyIjTmIZzp0",
+  authDomain: "crop-27ef5.firebaseapp.com",
+  projectId: "crop-27ef5",
+  storageBucket: "crop-27ef5.firebasestorage.app",
+  messagingSenderId: "787923806496",
+  appId: "1:787923806496:web:aa8faf6b596ad014448f45"
+};
 
   var dbApi = null, sampleApi = null, downloadsApi = null;
   var dbReady = (async function(){
@@ -415,6 +415,34 @@
   // にする。アプリ側は「AI機能が使えない場合」の表示（生の記録だけの簡易版）
   // に自動的にフォールバックする作りになっている。
   var sampleReady = (async function(){ sampleApi = null; })();
+  // Safari specifically: a synthetic click on a download link only works
+  // when it happens as the direct, synchronous continuation of a real user
+  // gesture. downloadsApi.save() is normally called after `await`ing
+  // Firestore reads (fetching photos, building CSV rows first), so by the
+  // time this runs, Safari has already dropped the original click's "user
+  // activation" — it then silently ignores a.click() (no error, no popup
+  // notice, nothing in the download history at all). Chrome/Firefox/Edge
+  // don't have this restriction, so they aren't affected.
+  var __isSafariDl = /^((?!chrome|android|crios|fxios|edg).)*safari/i.test(navigator.userAgent || '');
+  function ensureDownloadFallbackStack(){
+    var c = document.getElementById('__dl-fallback-stack');
+    if (c) return c;
+    var st = document.createElement('style');
+    st.textContent =
+      '#__dl-fallback-stack{position:fixed;right:14px;bottom:14px;z-index:99999;'+
+      'display:flex;flex-direction:column-reverse;gap:.5rem;align-items:flex-end;}'+
+      '.__dl-fallback{background:#1e6fea;color:#fff;font-family:-apple-system,system-ui,sans-serif;'+
+      'font-size:13px;font-weight:700;padding:.7rem 1rem;border-radius:10px;'+
+      'box-shadow:0 4px 16px rgba(0,0,0,.28);text-decoration:none;display:block;'+
+      'max-width:min(86vw,360px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'+
+      'animation:__dlfin .2s ease-out;}'+
+      '@keyframes __dlfin{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}';
+    document.head.appendChild(st);
+    c = document.createElement('div');
+    c.id = '__dl-fallback-stack';
+    document.body.appendChild(c);
+    return c;
+  }
   var downloadsReady = (async function(){
     downloadsApi = {
       save: function(opts){
@@ -437,10 +465,30 @@
             a.style.display = 'none';
             document.body.appendChild(a);
             a.click();
-            setTimeout(function(){
-              document.body.removeChild(a);
-              URL.revokeObjectURL(url);
-            }, 1000);
+            document.body.removeChild(a);
+
+            if (__isSafariDl){
+              // Guaranteed-to-work fallback: a real, fresh tap on this chip
+              // is a brand-new user gesture, so Safari always honors it —
+              // unlike the automatic click above, which Safari may have
+              // silently swallowed.
+              var stack = ensureDownloadFallbackStack();
+              var chip = document.createElement('a');
+              chip.href = url; chip.download = filename; chip.rel = 'noopener';
+              chip.className = '__dl-fallback';
+              chip.textContent = '⬇ 保存されない場合はここをタップ：' + filename;
+              var dismissed = false;
+              function dismiss(){
+                if (dismissed) return; dismissed = true;
+                if (chip.parentNode) chip.parentNode.removeChild(chip);
+                setTimeout(function(){ URL.revokeObjectURL(url); }, 500);
+              }
+              chip.addEventListener('click', function(){ setTimeout(dismiss, 400); });
+              stack.appendChild(chip);
+              setTimeout(dismiss, 30000);
+            } else {
+              setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+            }
             resolve();
           }catch(e){ reject(e); }
         });
