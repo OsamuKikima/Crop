@@ -418,18 +418,31 @@
   var downloadsReady = (async function(){
     downloadsApi = {
       save: function(opts){
-        return new Promise(function(resolve){
-          var filename = opts.filename || 'download.txt';
-          var data = opts.data;
-          var blob = (data instanceof Blob) ? data : new Blob([data], {type:'text/plain'});
-          var url = URL.createObjectURL(blob);
-          var a = document.createElement('a');
-          a.href = url; a.download = filename;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
-          resolve();
+        return new Promise(function(resolve, reject){
+          try{
+            var filename = opts.filename || 'download.txt';
+            var data = opts.data;
+            // Safari (and some other non-Chromium browsers) treat a
+            // text/plain blob as something to navigate to / render inline
+            // rather than download, so the `download` attribute below gets
+            // silently ignored and no file ever appears — even though this
+            // code sees no error. application/octet-stream reliably forces
+            // a real download across browsers, so text data (CSV etc.) is
+            // wrapped with that type; a Blob passed in already (photos,
+            // PPTX) keeps its own type since those already download fine.
+            var blob = (data instanceof Blob) ? data : new Blob([data], {type:'application/octet-stream'});
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url; a.download = filename; a.rel = 'noopener';
+            a.style.display = 'none';
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(function(){
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+            }, 1000);
+            resolve();
+          }catch(e){ reject(e); }
         });
       }
     };
