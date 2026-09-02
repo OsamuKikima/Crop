@@ -2,14 +2,14 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<!-- 参加者からの記録送信 Pop はスマートフォンでの利用を主に想定しているため、
+<!-- ワークの記録を送信 Pop はスマートフォンでの利用を主に想定しているため、
      実機の画面幅にきちんと収まるよう viewport を明示する。
      （Claudeアーティファクトとして動いていたときは、ホスト側のページが
      自動的にこのタグを付けてくれていたため不要だったが、GitHub Pages
      など単独のHTMLとして配信する場合は自分で用意する必要がある） -->
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>ワークショップ記録帳 Crop</title>
-<meta name="description" content="ワークショップのフォルダを作成してQRコードを発行し、参加者は同じリンクから記録を入力。集まった記録や概要情報をCSVで書き出せる、ひとつにまとまった記録ツール。">
+<meta name="description" content="ワークショップを作成してQRコードを発行し、参加者は同じリンクから記録を入力。集まった記録や概要情報をCSVで書き出せる、ひとつにまとまった記録ツール。">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Kosugi+Maru&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@500;600&display=swap">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <!-- AIによる報告書(PDF)・まとめスライド(PPTX)生成は行わないため、
@@ -17,7 +17,7 @@
 <!-- Firebase SDK（compatバージョン。<script>タグでそのまま使えます） -->
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
-<!-- reCAPTCHA v2（チェックボックス）。最初の管理者登録画面のみで使用。
+<!-- reCAPTCHA v2（チェックボックス）。最初のメインファシリテーター登録画面のみで使用。
      読み込みに失敗しても他の画面は問題なく動くよう async にしてある。 -->
 <script src="https://www.google.com/recaptcha/api.js?hl=ja" async defer></script>
 
@@ -92,6 +92,10 @@
   .brand-icon rect{fill:var(--leaf-soft);}
   .brand-icon .stem{stroke:var(--leaf-strong); stroke-width:1.5; fill:none; stroke-linecap:round;}
   .brand-icon .leaf{fill:var(--leaf);}
+  /* 参加者側「ワークの記録を送信 Pop」用のヘッダアイコン（送信＝紙飛行機）。
+     記録関連の既存カラートークン（--record系）を流用している。 */
+  .brand-icon.mode-participant rect{fill:var(--record-soft);}
+  .brand-icon.mode-participant .send{fill:var(--record);}
   .topbar .back{
     background:none; border:none; color:var(--accent-strong); font-size:.85rem; font-weight:700; cursor:pointer;
     display:flex; align-items:center; gap:.25rem;
@@ -215,9 +219,17 @@
   .reset-code-box{background:var(--record-soft); border:1px dashed var(--record-strong); border-radius:12px; padding:1rem 1.1rem; text-align:center; margin:.8rem 0;}
   .reset-code-box .code{font-family:var(--font-mono); font-size:1.4rem; font-weight:800; letter-spacing:.14em; color:var(--record-strong); margin:.3rem 0;}
   .reset-code-warn{color:var(--record-strong); font-size:.78rem; font-weight:700; line-height:1.7;}
-  .admin-account-row{display:flex; align-items:center; justify-content:space-between; gap:.6rem; border:1px solid var(--line); border-radius:10px; padding:.6rem .8rem; margin-bottom:.5rem; font-size:.85rem;}
+  .admin-account-row{display:flex; align-items:center; justify-content:space-between; gap:.6rem; border:1px solid var(--line); border-radius:10px; padding:.6rem .8rem; margin-bottom:.5rem; font-size:.85rem; flex-wrap:wrap;}
+  .admin-account-row .email-col{display:flex; flex-direction:column; gap:.1rem; min-width:0;}
   .admin-account-row .email{font-weight:700; color:var(--ink);}
   .admin-account-row .created{font-size:.72rem; color:var(--ink-faint); font-family:var(--font-mono);}
+  .admin-account-row .limit-col{display:flex; align-items:center; gap:.4rem; flex-shrink:0;}
+  .limit-badge{display:inline-flex; align-items:center; padding:.25rem .6rem; border-radius:999px; font-size:.72rem; font-weight:700; white-space:nowrap;}
+  .limit-badge.unlimited{background:var(--accent-soft); color:var(--accent-strong);}
+  .limit-badge.limited{background:var(--surface-2); color:var(--ink-soft); border:1px solid var(--line);}
+  .limit-edit-btn{background:none; border:none; color:var(--accent, #1e6fea); font-size:.72rem; font-weight:700; cursor:pointer; padding:.2rem .3rem; text-decoration:underline;}
+  .limit-edit-row{display:flex; align-items:center; gap:.35rem;}
+  .limit-edit-row input{width:4.5rem; border:1px solid var(--line); border-radius:6px; padding:.25rem .4rem; font-size:.78rem; background:var(--surface); color:var(--ink);}
   .reflection-edit-panel{margin-top:.7rem; padding:.8rem; border:1px solid var(--reflect); border-radius:12px; background:var(--surface-2);}
   .radio-row{display:flex; flex-wrap:wrap; gap:.5rem; margin-bottom:.4rem;}
   .radio-pill{display:inline-flex; align-items:center; gap:.35rem; font-size:.82rem; background:var(--surface); border:1px solid var(--line); border-radius:999px; padding:.4rem .8rem; cursor:pointer; font-weight:600; color:var(--ink-soft);}
@@ -368,7 +380,7 @@
 <div class="app" id="app-root">
   <header class="topbar">
     <div class="brand">
-      <svg class="brand-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <svg class="brand-icon" id="brand-icon" viewBox="0 0 24 24" aria-hidden="true">
         <rect x="1" y="1" width="22" height="22" rx="7"></rect>
         <path class="stem" d="M12 19c0-3.2 0-6.6 0-9.8"></path>
         <path class="leaf" d="M12 13.6c-2.7 0.5-5.4-1-6.2-4.3 3-0.9 5.8 0.5 6.4 3.1 0.15 0.6 0.1 1-0.2 1.2z"></path>
@@ -410,20 +422,31 @@
      元アプリ(gijinote-unified.html)から変更していない）。
   ============================================================ */
   var firebaseConfig = {
-  apiKey: "AIzaSyBpegGmC8JH7svjZlhgGWxNoyIjTmIZzp0",
-  authDomain: "crop-27ef5.firebaseapp.com",
-  projectId: "crop-27ef5",
-  storageBucket: "crop-27ef5.firebasestorage.app",
-  messagingSenderId: "787923806496",
-  appId: "1:787923806496:web:aa8faf6b596ad014448f45"
-};
+    apiKey: "AIzaSyBpegGmC8JH7svjZlhgGWxNoyIjTmIZzp0",
+    authDomain: "crop-27ef5.firebaseapp.com",
+    projectId: "crop-27ef5",
+    storageBucket: "crop-27ef5.firebasestorage.app",
+    messagingSenderId: "787923806496",
+    appId: "1:787923806496:web:aa8faf6b596ad014448f45"
+  };
 
   // reCAPTCHA v2（チェックボックス）のサイトキー。
   // https://www.google.com/recaptcha/admin で「v2 / “I'm not a robot”チェックボックス」
   // を選んで登録し、発行された「サイトキー」をここに貼り付けてください
   // （「シークレットキー」はサーバー側でしか使えないため、ここには不要です／貼らないでください）。
-  // 未設定（このままの値）のときは、最初の管理者登録画面にreCAPTCHAを表示しません。
+  // 未設定（このままの値）のときは、最初のメインファシリテーター登録画面にreCAPTCHAを表示しません。
   var RECAPTCHA_SITE_KEY = "6Lf3cqQtAAAAAOj-G8Q7KtFqyvuN299DR__pCokl";
+
+  // マスターファシリテーター（ワークショップ作成数が無制限になる唯一のアカウント）。
+  // このメールアドレスのアカウントだけがワークショップ作成上限を持たず、
+  // 他のファシリテーターアカウントの上限を指定できる。
+  var MASTER_FACILITATOR_EMAIL = "kikimaosamu@gmail.com";
+  // 個別のnormalizeEmail()（Managerモジュール内で定義）に依存せず、この関数
+  // 単体で完結させておく（この関数はManagerモジュールの外で定義されているため）。
+  function isMasterFacilitatorEmail(email){
+    var norm = function(s){ return String(s||'').trim().toLowerCase(); };
+    return norm(email) === norm(MASTER_FACILITATOR_EMAIL);
+  }
 
   var dbApi = null, sampleApi = null, downloadsApi = null;
   var dbReady = (async function(){
@@ -685,7 +708,7 @@
     return CANONICAL_URL + '?' + qs + '#' + qs;
   }
   // The general participant entry point — not scoped to any one folder.
-  // Opening this URL always lands on 「参加者からの記録送信 Pop」
+  // Opening this URL always lands on 「ワークの記録を送信 Pop」
   // (the folder-picker screen participants start from), regardless of
   // what mode this browser last used (see the `mode` URL param handling
   // near the top of the file).
@@ -762,7 +785,7 @@
   // A URL like "...?mode=participant" (see participantEntryUrl() /
   // viewSessions()'s QR code) always opens straight into that mode, no
   // matter what this browser last used — this is what makes the manager's
-  // "参加者からの記録送信 Pop" link/QR reliable even on a device
+  // "ワークの記録を送信 Pop" link/QR reliable even on a device
   // that was previously used in manager mode.
   function modeFromUrl(){
     try{
@@ -816,11 +839,15 @@
     authShownCodeFor: null,  // the email that code belongs to
     adminAccounts: [],       // for the 'admins' management view
     addingAdmin: false,
-    addAdminForm: { email:'', password:'', passwordConfirm:'' },
+    addAdminForm: { email:'', password:'', passwordConfirm:'', creationLimit:'' },
     addAdminError: null,
     addAdminBusy: false,
     newAdminShownCode: null,
-    newAdminShownFor: null
+    newAdminShownFor: null,
+    editingLimitFor: null,   // account id currently being edited in the admins limit UI (master only)
+    editLimitValue: null,
+    editLimitError: null,
+    editLimitBusy: false
   };
   var unsubSessions = null, unsubCurrent = null, unsubEntries = null, unsubGroups = null, unsubSections = null, unsubReflection = null;
 
@@ -880,18 +907,22 @@
     }catch(e){ console.warn('manager account lookup failed', e); return null; }
   }
 
-  async function createManagerAccount(email, password, createdBy){
+  async function createManagerAccount(email, password, createdBy, creationLimit){
     var emailLower = normalizeEmail(email);
     var passwordSalt = randomHex(16);
     var passwordHash = await hashSecret(password, passwordSalt);
     var resetCode = randomResetCode();
     var resetCodeSalt = randomHex(16);
     var resetCodeHash = await hashSecret(normalizeResetCode(resetCode), resetCodeSalt);
+    // マスターファシリテーターのアカウントは常にcreationLimit:nullで無制限。
+    // それ以外は呼び出し側が検証済みの非負整数を渡す想定（未指定ならnull＝無制限扱いにはせず、
+    // 呼び出し側のバリデーションで必ず数値を渡すこと）。
     var doc = {
       email: String(email).trim(), emailLower: emailLower,
       passwordSalt: passwordSalt, passwordHash: passwordHash,
       resetCodeSalt: resetCodeSalt, resetCodeHash: resetCodeHash,
-      createdAt: new Date().toISOString(), createdBy: createdBy || null
+      createdAt: new Date().toISOString(), createdBy: createdBy || null,
+      creationLimit: isMasterFacilitatorEmail(emailLower) ? null : (typeof creationLimit === 'number' ? creationLimit : null)
     };
     var ref = await addDoc('managerAccounts', doc);
     return {id: ref.id, resetCode: resetCode, email: doc.email};
@@ -903,7 +934,7 @@
     if (!acct) return {ok:false, error:'メールアドレスまたはパスワードが正しくありません。'};
     var hash = await hashSecret(password, acct.passwordSalt);
     if (hash !== acct.passwordHash) return {ok:false, error:'メールアドレスまたはパスワードが正しくありません。'};
-    return {ok:true, account:{id:acct.id, email:acct.email}};
+    return {ok:true, account:{id:acct.id, email:acct.email, creationLimit: (typeof acct.creationLimit === 'number' ? acct.creationLimit : null)}};
   }
 
   async function attemptManagerReset(email, code, newPassword){
@@ -922,7 +953,7 @@
       resetCodeSalt: newResetCodeSalt, resetCodeHash: newResetCodeHash,
       updatedAt: new Date().toISOString()
     });
-    return {ok:true, account:{id:acct.id, email:acct.email}, resetCode:newResetCode};
+    return {ok:true, account:{id:acct.id, email:acct.email, creationLimit: (typeof acct.creationLimit === 'number' ? acct.creationLimit : null)}, resetCode:newResetCode};
   }
 
   /* ============================================================
@@ -945,7 +976,7 @@
     }
 
     document.getElementById('back-slot').innerHTML = state.view === 'sessions' ? '' :
-      '<button class="back" id="back-btn">‹ フォルダ一覧</button>';
+      '<button class="back" id="back-btn">‹ ワークショップ一覧</button>';
     var root = document.getElementById('view-root');
     if (state.view === 'sessions') root.innerHTML = viewSessions();
     else if (state.view === 'new') root.innerHTML = viewNew();
@@ -975,7 +1006,7 @@
     return state.authError ? '<p class="form-error">' + esc(state.authError) + '</p>' : '';
   }
 
-  // reCAPTCHA v2（最初の管理者登録画面のみ）。
+  // reCAPTCHA v2（最初のメインファシリテーター登録画面のみ）。
   // サイトキーが未設定（プレースホルダのまま）のときは、この記録帳をそのまま
   // 使い始められるよう、reCAPTCHAなしで登録できるようにフォールバックする。
   var recaptchaWidgetId = null;
@@ -1007,9 +1038,9 @@
     var f = state.authForm;
     return (
       '<section class="block auth-card">' +
-        '<h2 style="margin-top:0;">はじめに：管理者アカウントを登録</h2>' +
-        '<p class="hint" style="margin-top:-.3rem;">この記録帳をまだ誰も管理者として登録していません。参加者が管理者画面に入れないよう、最初の管理者アカウントを登録してください。</p>' +
-        '<div class="field"><label for="auth-email">メールアドレス</label><input type="email" id="auth-email" value="' + esc(f.email) + '" placeholder="例: manager@example.com"></div>' +
+        '<h2 style="margin-top:0;">はじめに：メインファシリテーターアカウントを登録</h2>' +
+        '<p class="hint" style="margin-top:-.3rem;">この記録帳をまだ誰もメインファシリテーターとして登録していません。参加者がメインファシリテーター画面に入れないよう、最初のメインファシリテーターアカウントを登録してください。</p>' +
+        '<div class="field"><label for="auth-email">メールアドレス</label><input type="email" id="auth-email" value="' + esc(f.email) + '" placeholder="例: facili@example.com"></div>' +
         '<div class="field"><label for="auth-password">パスワード<span class="hint" style="font-weight:400;">（8文字以上）</span></label><input type="password" id="auth-password" value="' + esc(f.password) + '"></div>' +
         '<div class="field"><label for="auth-password-confirm">パスワード（確認）</label><input type="password" id="auth-password-confirm" value="' + esc(f.passwordConfirm) + '"></div>' +
         (isRecaptchaConfigured() ? '<div class="field"><div id="auth-recaptcha-holder"></div></div>' : '') +
@@ -1024,8 +1055,8 @@
     var f = state.authForm;
     return (
       '<section class="block auth-card">' +
-        '<h2 style="margin-top:0;">管理者ログイン</h2>' +
-        '<p class="hint" style="margin-top:-.3rem;">この画面は管理者専用です。参加者は「参加者画面へ」からご利用ください。</p>' +
+        '<h2 style="margin-top:0;">メインファシリテーターログイン</h2>' +
+        '<p class="hint" style="margin-top:-.3rem;">この画面はメインファシリテーター専用です。参加者は「参加者画面へ」からご利用ください。</p>' +
         '<div class="field"><label for="auth-email">メールアドレス</label><input type="email" id="auth-email" value="' + esc(f.email) + '"></div>' +
         '<div class="field"><label for="auth-password">パスワード</label><input type="password" id="auth-password" value="' + esc(f.password) + '"></div>' +
         authErrorHtml() +
@@ -1040,7 +1071,7 @@
     return (
       '<section class="block auth-card">' +
         '<h2 style="margin-top:0;">パスワードの再設定</h2>' +
-        '<p class="hint" style="margin-top:-.3rem;">登録時に表示された再設定コードを入力してください。コードが分からない場合、このアプリは実際にメールを送信できないため復旧できません。他の管理者に新しい管理者アカウントを追加してもらってください。</p>' +
+        '<p class="hint" style="margin-top:-.3rem;">登録時に表示された再設定コードを入力してください。コードが分からない場合、このアプリは実際にメールを送信できないため復旧できません。他のメインファシリテーターに新しいメインファシリテーターアカウントを追加してもらってください。</p>' +
         '<div class="field"><label for="auth-email">メールアドレス</label><input type="email" id="auth-email" value="' + esc(f.email) + '"></div>' +
         '<div class="field"><label for="auth-reset-code">再設定コード</label><input type="text" id="auth-reset-code" value="' + esc(f.resetCode) + '" placeholder="例: AB3D-EFGH" style="font-family:var(--font-mono); letter-spacing:.08em; text-transform:uppercase;"></div>' +
         '<div class="field"><label for="auth-password">新しいパスワード<span class="hint" style="font-weight:400;">（8文字以上）</span></label><input type="password" id="auth-password" value="' + esc(f.password) + '"></div>' +
@@ -1129,7 +1160,7 @@
       }
       var result = await createManagerAccount(email, f.password, null);
       setStoredManagerAccountId(result.id);
-      state.authAccount = {id: result.id, email: result.email};
+      state.authAccount = {id: result.id, email: result.email, creationLimit: null};
       state.authShownCode = result.resetCode;
       state.authShownCodeFor = result.email;
       state.authBusy = false;
@@ -1212,35 +1243,59 @@
   ============================================================ */
   function viewAdmins(){
     var f = state.addAdminForm;
+    var iAmMaster = currentAccountIsMaster();
     return (
-      '<h2 style="margin-top:0;">管理者アカウント</h2>' +
+      '<h2 style="margin-top:0;">メインファシリテーターアカウント</h2>' +
       '<p class="hint" style="margin-top:-.3rem;">現在ログイン中: <b>' + esc((state.authAccount&&state.authAccount.email)||'') + '</b></p>' +
       state.adminAccounts.map(function(a){
-        return '<div class="admin-account-row"><span class="email">' + esc(a.email) +
+        var accountIsMaster = isMasterFacilitatorEmail(a.emailLower || a.email);
+        var isEditingThisRow = iAmMaster && !accountIsMaster && state.editingLimitFor === a.id;
+        var limitCol;
+        if (accountIsMaster){
+          limitCol = '<span class="limit-badge unlimited">無制限</span>';
+        } else if (isEditingThisRow){
+          limitCol = '<span class="limit-edit-row">' +
+            '<input type="number" min="0" step="1" id="edit-limit-input" value="' + esc(String(state.editLimitValue!=null?state.editLimitValue:(typeof a.creationLimit==='number'?a.creationLimit:''))) + '">' +
+            '<button class="btn-sm primary" id="save-limit-btn" data-account="' + esc(a.id) + '"' + (state.editLimitBusy?' disabled':'') + '>保存</button>' +
+            '<button class="btn-sm" id="cancel-limit-btn">キャンセル</button>' +
+          '</span>';
+        } else {
+          var limitText = (typeof a.creationLimit === 'number') ? (a.creationLimit + '件まで') : '未設定';
+          limitCol = '<span class="limit-badge limited">上限 ' + esc(limitText) + '</span>' +
+            (iAmMaster ? '<button class="limit-edit-btn" type="button" data-edit-limit="' + esc(a.id) + '">変更</button>' : '');
+        }
+        return '<div class="admin-account-row">' +
+          '<span class="email-col"><span class="email">' + esc(a.email) +
           (state.authAccount && a.id === state.authAccount.id ? '（自分）' : '') + '</span>' +
-          '<span class="created">' + esc((a.createdAt||'').slice(0,10)) + '</span></div>';
+          '<span class="created">' + esc((a.createdAt||'').slice(0,10)) + '</span></span>' +
+          '<span class="limit-col">' + limitCol + '</span>' +
+          (isEditingThisRow && state.editLimitError ? '<p class="form-error" style="width:100%; margin:.3rem 0 0;">' + esc(state.editLimitError) + '</p>' : '') +
+        '</div>';
       }).join('') +
       (state.newAdminShownCode ? (
         '<div class="reset-code-box"><p class="hint" style="margin:0 0 .3rem;">' + esc(state.newAdminShownFor||'') + ' の再設定コード（1回だけ表示）</p>' +
           '<div class="code" id="new-admin-shown-code">' + esc(state.newAdminShownCode) + '</div>' +
           '<button class="btn-sm primary" id="copy-new-admin-code-btn" type="button">コードをコピー</button>' +
         '</div>' +
-        '<p class="reset-code-warn">この内容はもう一度は表示されません。追加した管理者に、安全な方法でパスワードとこのコードを伝えてください。</p>' +
+        '<p class="reset-code-warn">この内容はもう一度は表示されません。追加したメインファシリテーターに、安全な方法でパスワードとこのコードを伝えてください。</p>' +
         '<button class="btn-sm" id="dismiss-new-admin-code-btn" type="button">閉じる</button>'
       ) : (
         state.addingAdmin ? (
           '<section class="block" style="margin-top:1rem;">' +
-            '<h3 style="margin-top:0; font-size:.95rem;">管理者を追加</h3>' +
+            '<h3 style="margin-top:0; font-size:.95rem;">メインファシリテーターを追加</h3>' +
             '<div class="field"><label for="aa-email">メールアドレス</label><input type="email" id="aa-email" value="' + esc(f.email) + '"></div>' +
             '<div class="field"><label for="aa-password">パスワード<span class="hint" style="font-weight:400;">（8文字以上）</span></label><input type="password" id="aa-password" value="' + esc(f.password) + '"></div>' +
             '<div class="field"><label for="aa-password-confirm">パスワード（確認）</label><input type="password" id="aa-password-confirm" value="' + esc(f.passwordConfirm) + '"></div>' +
+            '<div class="field"><label for="aa-creation-limit">ワークショップ作成数の上限<span class="hint" style="font-weight:400;">（0件以上の整数）</span></label><input type="number" min="0" step="1" id="aa-creation-limit" value="' + esc(f.creationLimit) + '">' +
+              '<p class="hint" style="margin:.25rem 0 0;">' + esc(MASTER_FACILITATOR_EMAIL) + '（マスターファシリテーター）を追加する場合、この項目は無視され自動的に無制限になります。</p>' +
+            '</div>' +
             (state.addAdminError ? '<p class="form-error">' + esc(state.addAdminError) + '</p>' : '') +
             '<div style="display:flex; gap:.5rem;">' +
               '<button class="btn-sm primary" id="save-new-admin-btn"' + (state.addAdminBusy?' disabled':'') + '>' + (state.addAdminBusy?'追加中…':'追加する') + '</button>' +
               '<button class="btn-sm" id="cancel-new-admin-btn">キャンセル</button>' +
             '</div>' +
           '</section>'
-        ) : '<button class="btn-sm primary" id="add-admin-btn" style="margin-top:1rem;">＋ 管理者を追加</button>'
+        ) : '<button class="btn-sm primary" id="add-admin-btn" style="margin-top:1rem;">＋ メインファシリテーターを追加</button>'
       )) +
       '<div style="margin-top:1.2rem;"><button class="btn-sm" id="manager-logout-btn">ログアウト</button></div>'
     );
@@ -1261,8 +1316,9 @@
     if (unsubSections) { unsubSections(); unsubSections = null; }
     if (unsubReflection) { unsubReflection(); unsubReflection = null; }
     state.view = 'admins';
-    state.addingAdmin = false; state.addAdminForm = {email:'', password:'', passwordConfirm:''}; state.addAdminError = null;
+    state.addingAdmin = false; state.addAdminForm = {email:'', password:'', passwordConfirm:'', creationLimit:''}; state.addAdminError = null;
     state.newAdminShownCode = null; state.newAdminShownFor = null;
+    state.editingLimitFor = null; state.editLimitValue = null; state.editLimitError = null; state.editLimitBusy = false;
     render();
     await fetchAdminAccounts();
     if (state.view === 'admins') render();
@@ -1274,6 +1330,16 @@
     if (!isValidEmailFormat(email)){ state.addAdminError = 'メールアドレスの形式が正しくありません。'; render(); return; }
     if ((f.password||'').length < 8){ state.addAdminError = 'パスワードは8文字以上にしてください。'; render(); return; }
     if (f.password !== f.passwordConfirm){ state.addAdminError = 'パスワード（確認）が一致しません。'; render(); return; }
+    var addingMaster = isMasterFacilitatorEmail(email);
+    var creationLimitNum = null;
+    if (!addingMaster){
+      var rawLimit = String(f.creationLimit==null?'':f.creationLimit).trim();
+      if (rawLimit === '' || !/^\d+$/.test(rawLimit)){
+        state.addAdminError = 'ワークショップ作成数の上限を0以上の整数で入力してください。';
+        render(); return;
+      }
+      creationLimitNum = parseInt(rawLimit, 10);
+    }
     state.addAdminBusy = true; state.addAdminError = null; render();
     try{
       var existing = await findManagerAccountByEmail(normalizeEmail(email));
@@ -1282,7 +1348,7 @@
         state.addAdminError = 'このメールアドレスはすでに登録されています。';
         render(); return;
       }
-      var result = await createManagerAccount(email, f.password, state.authAccount ? state.authAccount.id : null);
+      var result = await createManagerAccount(email, f.password, state.authAccount ? state.authAccount.id : null, creationLimitNum);
       await fetchAdminAccounts();
       state.addAdminBusy = false;
       state.addingAdmin = false;
@@ -1297,22 +1363,39 @@
     }
   }
 
+  async function saveAdminLimit(accountId, newLimit){
+    state.editLimitBusy = true; state.editLimitError = null; render();
+    try{
+      await dbApi.doc('managerAccounts/'+accountId).update({ creationLimit: newLimit, updatedAt: new Date().toISOString() });
+      await fetchAdminAccounts();
+      state.editLimitBusy = false;
+      state.editingLimitFor = null; state.editLimitValue = null; state.editLimitError = null;
+      toast('上限を変更しました');
+      render();
+    }catch(err){
+      console.error(err);
+      state.editLimitBusy = false;
+      state.editLimitError = '変更に失敗しました。もう一度お試しください。';
+      render();
+    }
+  }
+
   function viewSessions(){
     return (
       '<div class="top-actions"><button class="primary-btn" id="new-session-btn">＋ 新しい記録帳を作成</button></div>' +
       '<p class="hint" style="margin:-.4rem 0 .9rem; display:flex; flex-wrap:wrap; gap:.2rem 1rem; align-items:center;">' +
         '<span>ログイン中: <b>' + esc((state.authAccount&&state.authAccount.email)||'') + '</b></span>' +
-        '<button class="auth-switch-link" id="goto-admins-btn" type="button">管理者アカウント</button>' +
+        '<button class="auth-switch-link" id="goto-admins-btn" type="button">メインファシリテーターアカウント</button>' +
         '<button class="auth-switch-link" id="manager-logout-btn2" type="button">ログアウト</button>' +
       '</p>' +
       '<section class="block">' +
-        '<h2 style="margin-top:0;">参加者からの記録送信 Pop</h2>' +
-        '<p class="hint" style="margin-top:0;">このリンク・QRコードを開くと、端末が以前どちらのモードで使われていたかに関わらず、参加者がフォルダを選ぶ画面（参加者からの記録送信 Pop）に直接アクセスできます。会場の入り口などに掲示・配布してください。</p>' +
+        '<h2 style="margin-top:0;">ワークの記録を送信 Pop</h2>' +
+        '<p class="hint" style="margin-top:0;">このリンク・QRコードを開くと、端末が以前どちらのモードで使われていたかに関わらず、参加者がワークショップを選ぶ画面（ワークの記録を送信 Pop）に直接アクセスできます。会場の入り口などに掲示・配布してください。</p>' +
         '<details style="margin-top:.6rem;"><summary class="hint" style="cursor:pointer;">QRコード・リンクを表示</summary>' +
           '<div class="qr-wrap" style="margin-top:.6rem;">' +
             '<div id="participant-entry-qr-holder"></div>' +
             '<div class="qr-side">' +
-              '<p class="hint" style="margin-top:0;">このQRコードを読み取ると、参加者からの記録送信 Popが直接開きます。</p>' +
+              '<p class="hint" style="margin-top:0;">このQRコードを読み取ると、ワークの記録を送信 Popが直接開きます。</p>' +
               '<div class="link-row"><input type="text" readonly id="participant-entry-link-text" value="' + esc(participantEntryUrl()) + '"><button class="btn-sm" id="copy-participant-entry-link-btn">リンクをコピー</button></div>' +
             '</div>' +
           '</div>' +
@@ -1321,11 +1404,11 @@
       (state.sessions.length ?
         state.sessions.map(function(s){
           return '<div class="s-card" data-open="' + s.id + '">' +
-            '<div class="info"><div class="date">' + esc(s.dateISO||'—') + '</div><h3>' + esc(s.title||'無題のフォルダ') + '</h3></div>' +
+            '<div class="info"><div class="date">' + esc(s.dateISO||'—') + '</div><h3>' + esc(s.title||'無題のワークショップ') + '</h3></div>' +
             '<div class="arrow">›</div>' +
           '</div>';
         }).join('')
-        : '<div class="empty"><div class="big">📁</div>フォルダはまだありません。<br>「新しい記録帳を作成」から始めましょう。</div>')
+        : '<div class="empty"><div class="big">📁</div>ワークショップはまだありません。<br>「新しい記録帳を作成」から始めましょう。</div>')
     );
   }
 
@@ -1356,7 +1439,7 @@
         '<div class="field"><label for="nf-sections">記録する問いの数</label>' + countSelectHtml('nf-sections', f.sectionCount, 20, 'なし', '') + '</div>' +
         '<p class="hint" style="margin-top:-.5rem; margin-bottom:.9rem;">ワークショップが複数の問い(進行フェーズ)に分かれる場合は数を選んでください。進行中に管理画面から次の問いへ進められ、あとから追加もできます。</p>' +
         '<div class="field" style="flex-direction:row; align-items:flex-start; gap:.5rem;"><input type="checkbox" id="nf-ask-about" style="width:auto; margin-top:.2rem;" ' + (f.askAbout !== false ? 'checked' : '') + '><label for="nf-ask-about" style="font-size:.85rem; color:var(--ink); letter-spacing:0;">参加者に「あなたについて」（出席者・記入者、グループ番号）を入力してもらう</label></div>' +
-        '<p class="hint" style="margin-top:-.5rem; margin-bottom:.9rem;">オフにすると、「参加者からの記録送信 Pop」に「あなたについて」欄が表示されなくなります。</p>' +
+        '<p class="hint" style="margin-top:-.5rem; margin-bottom:.9rem;">オフにすると、「ワークの記録を送信 Pop」に「あなたについて」欄が表示されなくなります。</p>' +
         '<button class="primary-btn" id="create-session-btn" style="width:100%;">記録帳を作成する</button>' +
       '</section>'
     );
@@ -1374,14 +1457,21 @@
         '<div class="eyebrow">FOLDER</div>' +
         (state.editingSession ? (
           '<div class="row2" style="margin-top:.4rem;">' +
-            '<div class="field" style="margin-bottom:.5rem;"><label for="es-title">件名</label><input type="text" id="es-title" value="' + esc(state.sessionEditDraft.title) + '"></div>' +
-            '<div class="field" style="margin-bottom:.5rem;"><label for="es-date">日付</label><input type="date" id="es-date" value="' + esc(state.sessionEditDraft.dateISO) + '"></div>' +
+            '<div class="field" style="margin-bottom:.5rem;"><label for="es-title">件名</label><input type="text" id="es-title" value="' + esc(state.sessionEditDraft.title) + '"' + overviewFieldDisabledAttr('title') + '></div>' +
+            '<div class="field" style="margin-bottom:.5rem;"><label for="es-date">日付</label><input type="date" id="es-date" value="' + esc(state.sessionEditDraft.dateISO) + '"' + overviewFieldDisabledAttr('dateISO') + '></div>' +
           '</div>' +
-          '<div class="field" style="margin-bottom:.5rem;"><label for="es-purpose">ワークショップのねらい<span class="hint" style="font-weight:400;">（任意）</span></label><textarea id="es-purpose" rows="2">' + esc(state.sessionEditDraft.purpose) + '</textarea></div>' +
-          '<div class="field" style="margin-bottom:.5rem;"><label for="es-location">実施場所<span class="hint" style="font-weight:400;">（任意）</span></label><input type="text" id="es-location" value="' + esc(state.sessionEditDraft.location) + '"></div>' +
-          '<div class="field" style="margin-bottom:.5rem;"><label for="es-participants">参加対象者<span class="hint" style="font-weight:400;">（任意）</span></label><input type="text" id="es-participants" value="' + esc(state.sessionEditDraft.participants) + '"></div>' +
-          '<div class="field" style="margin-bottom:.5rem;"><label for="es-participant-count">おおよその参加者人数<span class="hint" style="font-weight:400;">（任意）</span></label><input type="text" id="es-participant-count" value="' + esc(state.sessionEditDraft.participantCount) + '"></div>' +
-          '<div class="field" style="margin-bottom:.5rem;"><label for="es-industry">対象となる業界・業種<span class="hint" style="font-weight:400;">（任意）</span></label><input type="text" id="es-industry" placeholder="例: 製造業、自治体、学校など" value="' + esc(state.sessionEditDraft.industry) + '"></div>' +
+          overviewFieldLockHint('title') +
+          overviewFieldLockHint('dateISO') +
+          '<div class="field" style="margin-bottom:.5rem;"><label for="es-purpose">ワークショップのねらい<span class="hint" style="font-weight:400;">（任意）</span></label><textarea id="es-purpose" rows="2"' + overviewFieldDisabledAttr('purpose') + '>' + esc(state.sessionEditDraft.purpose) + '</textarea></div>' +
+          overviewFieldLockHint('purpose') +
+          '<div class="field" style="margin-bottom:.5rem;"><label for="es-location">実施場所<span class="hint" style="font-weight:400;">（任意）</span></label><input type="text" id="es-location" value="' + esc(state.sessionEditDraft.location) + '"' + overviewFieldDisabledAttr('location') + '></div>' +
+          overviewFieldLockHint('location') +
+          '<div class="field" style="margin-bottom:.5rem;"><label for="es-participants">参加対象者<span class="hint" style="font-weight:400;">（任意）</span></label><input type="text" id="es-participants" value="' + esc(state.sessionEditDraft.participants) + '"' + overviewFieldDisabledAttr('participants') + '></div>' +
+          overviewFieldLockHint('participants') +
+          '<div class="field" style="margin-bottom:.5rem;"><label for="es-participant-count">おおよその参加者人数<span class="hint" style="font-weight:400;">（任意）</span></label><input type="text" id="es-participant-count" value="' + esc(state.sessionEditDraft.participantCount) + '"' + overviewFieldDisabledAttr('participantCount') + '></div>' +
+          overviewFieldLockHint('participantCount') +
+          '<div class="field" style="margin-bottom:.5rem;"><label for="es-industry">対象となる業界・業種<span class="hint" style="font-weight:400;">（任意）</span></label><input type="text" id="es-industry" placeholder="例: 製造業、自治体、学校など" value="' + esc(state.sessionEditDraft.industry) + '"' + overviewFieldDisabledAttr('industry') + '></div>' +
+          overviewFieldLockHint('industry') +
           '<div class="field" style="flex-direction:row; align-items:flex-start; gap:.5rem; margin-bottom:.5rem;"><input type="checkbox" id="es-ask-about" style="width:auto; margin-top:.2rem;" ' + (state.sessionEditDraft.askAbout !== false ? 'checked' : '') + '><label for="es-ask-about" style="font-size:.85rem; color:var(--ink); letter-spacing:0;">参加者に「あなたについて」（出席者・記入者、グループ番号）を入力してもらう</label></div>' +
           '<div class="field" style="margin-bottom:.3rem;"><label>グループの選び方（グループを設定した場合）</label>' +
             '<div class="radio-row">' +
@@ -1396,7 +1486,7 @@
             '<button class="btn-sm" id="cancel-session-edit-btn">キャンセル</button>' +
           '</div>'
         ) : (
-          '<h1>' + esc(s.title||'無題のフォルダ') + '<button class="edit-link" id="edit-session-btn">編集</button></h1>' +
+          '<h1>' + esc(s.title||'無題のワークショップ') + '<button class="edit-link" id="edit-session-btn">編集</button></h1>' +
           '<div class="date">' + esc(formatDateLabel(s.dateISO)) + '</div>' +
           ((s.location || s.participants || s.participantCount || s.industry) ? '<div style="margin-top:.4rem; font-size:.85rem; display:flex; flex-wrap:wrap; gap:.3rem 1.1rem;">' +
             [
@@ -1432,7 +1522,7 @@
       (
         '<section class="block">' +
           '<h2>出力</h2>' +
-          '<p class="hint" style="margin-top:-.3rem; margin-bottom:.9rem;">フォルダの概要情報（件名・日時・参加者人数・業界業種・グループ／問い別の記録件数など）をCSVで保存できます。</p>' +
+          '<p class="hint" style="margin-top:-.3rem; margin-bottom:.9rem;">ワークショップの概要情報（件名・日時・参加者人数・業界業種・グループ／問い別の記録件数など）をCSVで保存できます。</p>' +
           '<button class="gen-btn zip" id="gen-overview-csv" ' + (state.gen.overviewCsv.busy?'disabled':'') + '>' +
             (state.gen.overviewCsv.busy ? '<span class="spin"></span>' : '🗂') + ' 概要情報を保存（CSV）' +
           '</button>' +
@@ -1440,7 +1530,7 @@
           (!downloadsApi ? '<p class="hint">※ この表示ではファイルの保存を利用できません。</p>' : '') +
           (entries.length ? (
             '<hr style="border:none; border-top:1px solid var(--line); margin:1rem 0;">' +
-            '<p class="hint" style="margin-top:0; margin-bottom:.9rem;">チェックした記録そのものを、CSVファイルと写真として保存できます（ZIPフォルダとしてまとめることはできないため、CSV1件・写真は1枚ずつ、続けて保存の確認が表示されます。写真のファイル名はCSVの「写真ファイル」欄と対応しています）。</p>' +
+            '<p class="hint" style="margin-top:0; margin-bottom:.9rem;">チェックした記録そのものを、CSVファイルと写真として保存できます（1つのZIPにまとめることはできないため、CSV1件・写真は1枚ずつ、続けて保存の確認が表示されます。写真のファイル名はCSVの「写真ファイル」欄と対応しています）。</p>' +
             '<button class="gen-btn zip" id="gen-zip" ' + (state.gen.zip.busy || !selCount ?'disabled':'') + '>' +
               (state.gen.zip.busy ? '<span class="spin"></span>' : '📦') + ' 選択した記録を保存（CSV＋写真）' +
             '</button>' +
@@ -1460,7 +1550,7 @@
         '</section>'
       ) +
 
-      '<button class="btn-sm danger" id="delete-session-btn">このフォルダを削除する</button>'
+      '<button class="btn-sm danger" id="delete-session-btn">このワークショップを削除する</button>'
     );
   }
 
@@ -1471,7 +1561,7 @@
       return (
         '<section class="block">' +
           '<h2>参加コード</h2>' +
-          '<p class="hint" style="margin-top:0;">下のコードを参加者に伝えてください。参加者は入力画面の「参加コードで参加」欄にこのコードを入力するだけで、直接この記録帳の記録画面を開けます（QRコード・リンクは開くとこのアプリ自体は開きますが、環境によってはフォルダが自動で選ばれないため、コードでの案内をおすすめします）。</p>' +
+          '<p class="hint" style="margin-top:0;">下のコードを参加者に伝えてください。参加者は入力画面の「参加コードで参加」欄にこのコードを入力するだけで、直接この記録帳の記録画面を開けます（QRコード・リンクは開くとこのアプリ自体は開きますが、環境によってはワークショップが自動で選ばれないため、コードでの案内をおすすめします）。</p>' +
           (s.joinCode ?
             '<div class="link-row"><input type="text" readonly id="join-code-text" value="' + esc(s.joinCode) + '" style="font-family:var(--font-mono); font-weight:700; letter-spacing:.12em; font-size:1rem;"><button class="btn-sm primary" data-copy-code="' + esc(s.joinCode) + '">コードをコピー</button></div>'
             : '<p class="hint">参加コードを準備しています…</p>') +
@@ -1479,7 +1569,7 @@
             '<div class="qr-wrap" style="margin-top:.6rem;">' +
               '<div id="qr-canvas-holder"></div>' +
               '<div class="qr-side">' +
-                '<p class="hint" style="margin-top:0;">このQRコードを読み取ると入力画面が開きます。フォルダは自動で選ばれない場合があるため、その際は上の参加コードをご利用ください。</p>' +
+                '<p class="hint" style="margin-top:0;">このQRコードを読み取ると入力画面が開きます。ワークショップは自動で選ばれない場合があるため、その際は上の参加コードをご利用ください。</p>' +
                 '<div class="link-row"><input type="text" readonly id="link-text" value="' + esc(linkFor(state.currentId)) + '"><button class="btn-sm" id="copy-link-btn">リンクをコピー</button></div>' +
               '</div>' +
             '</div>' +
@@ -1490,7 +1580,7 @@
     var joinMode = getGroupJoinMode(s);
     var modeHint =
       joinMode === 'code' ? '現在の設定では、参加者は一覧からグループを選べず、必ずこのコードを入力して参加します。' :
-      joinMode === 'list' ? '現在の設定では、参加者はこのコードを直接入力してグループに入ることはできず、フォルダの参加コードから一覧を開いてグループを選びます。コードは管理用です。' :
+      joinMode === 'list' ? '現在の設定では、参加者はこのコードを直接入力してグループに入ることはできず、ワークショップの参加コードから一覧を開いてグループを選びます。コードは管理用です。' :
       'それぞれのグループにコードを伝えてください。参加者が入力画面の「参加コードで参加」欄にこのコードを入力すると、自動でそのグループの記録画面が開きます。一覧から選んで参加することもできます。';
     return (
       '<section class="block">' +
@@ -1766,7 +1856,14 @@
   function bindView(){
     if (state.view === 'sessions'){
       var newBtn = document.getElementById('new-session-btn');
-      if (newBtn) newBtn.addEventListener('click', function(){ state.view='new'; state.newForm={title:'',dateISO:todayISO(),groupCount:0,sectionCount:0,purpose:'',location:'',participants:'',participantCount:'',industry:'',askAbout:true,groupJoinMode:'both'}; state.debugNote=null; render(); });
+      if (newBtn) newBtn.addEventListener('click', function(){
+        if (!canCreateMoreWorkshops()){
+          var limit = state.authAccount && typeof state.authAccount.creationLimit === 'number' ? state.authAccount.creationLimit : null;
+          toast('ワークショップの作成数が上限（' + limit + '件）に達しています。上限の変更はマスターファシリテーターにご相談ください。');
+          return;
+        }
+        state.view='new'; state.newForm={title:'',dateISO:todayISO(),groupCount:0,sectionCount:0,purpose:'',location:'',participants:'',participantCount:'',industry:'',askAbout:true,groupJoinMode:'both'}; state.debugNote=null; render();
+      });
       document.querySelectorAll('[data-open]').forEach(function(c){
         c.addEventListener('click', function(){ openSession(c.dataset.open); });
       });
@@ -1788,16 +1885,18 @@
     if (state.view === 'admins'){
       var addAdminBtn = document.getElementById('add-admin-btn');
       if (addAdminBtn) addAdminBtn.addEventListener('click', function(){
-        state.addingAdmin = true; state.addAdminForm = {email:'', password:'', passwordConfirm:''}; state.addAdminError = null; render();
+        state.addingAdmin = true; state.addAdminForm = {email:'', password:'', passwordConfirm:'', creationLimit:''}; state.addAdminError = null; render();
       });
       var cancelNewAdminBtn = document.getElementById('cancel-new-admin-btn');
       if (cancelNewAdminBtn) cancelNewAdminBtn.addEventListener('click', function(){
         state.addingAdmin = false; state.addAdminError = null; render();
       });
       var aaEmail = document.getElementById('aa-email'), aaPass = document.getElementById('aa-password'), aaPassConfirm = document.getElementById('aa-password-confirm');
+      var aaLimit = document.getElementById('aa-creation-limit');
       if (aaEmail) aaEmail.addEventListener('input', function(){ state.addAdminForm.email = aaEmail.value; });
       if (aaPass) aaPass.addEventListener('input', function(){ state.addAdminForm.password = aaPass.value; });
       if (aaPassConfirm) aaPassConfirm.addEventListener('input', function(){ state.addAdminForm.passwordConfirm = aaPassConfirm.value; });
+      if (aaLimit) aaLimit.addEventListener('input', function(){ state.addAdminForm.creationLimit = aaLimit.value; });
       var saveNewAdminBtn = document.getElementById('save-new-admin-btn');
       if (saveNewAdminBtn) saveNewAdminBtn.addEventListener('click', submitAddAdmin);
       var copyNewAdminCodeBtn = document.getElementById('copy-new-admin-code-btn');
@@ -1808,6 +1907,23 @@
       var dismissNewAdminCodeBtn = document.getElementById('dismiss-new-admin-code-btn');
       if (dismissNewAdminCodeBtn) dismissNewAdminCodeBtn.addEventListener('click', function(){
         state.newAdminShownCode = null; state.newAdminShownFor = null; render();
+      });
+      document.querySelectorAll('[data-edit-limit]').forEach(function(btn){
+        btn.addEventListener('click', function(){
+          state.editingLimitFor = btn.dataset.editLimit; state.editLimitValue = null; state.editLimitError = null; render();
+        });
+      });
+      var cancelLimitBtn = document.getElementById('cancel-limit-btn');
+      if (cancelLimitBtn) cancelLimitBtn.addEventListener('click', function(){
+        state.editingLimitFor = null; state.editLimitValue = null; state.editLimitError = null; render();
+      });
+      var editLimitInput = document.getElementById('edit-limit-input');
+      if (editLimitInput) editLimitInput.addEventListener('input', function(){ state.editLimitValue = editLimitInput.value; });
+      var saveLimitBtn = document.getElementById('save-limit-btn');
+      if (saveLimitBtn) saveLimitBtn.addEventListener('click', function(){
+        var raw = String(editLimitInput ? editLimitInput.value : (state.editLimitValue||'')).trim();
+        if (raw === '' || !/^\d+$/.test(raw)){ state.editLimitError = '0以上の整数で入力してください。'; render(); return; }
+        saveAdminLimit(saveLimitBtn.dataset.account, parseInt(raw, 10));
       });
       var logoutBtn = document.getElementById('manager-logout-btn');
       if (logoutBtn) logoutBtn.addEventListener('click', managerLogout);
@@ -2116,10 +2232,41 @@
       if (saveEditBtn) saveEditBtn.addEventListener('click', async function(){
         var d = state.sessionEditDraft;
         if (!d.title.trim()){ toast('件名を入力してください'); return; }
+        // 概要項目：1回のみ修正方式。画面上はdisabledで変更させていない項目でも、
+        // 念のため保存時にも「すでに修正済みの項目は元の値を強制する」「まだ
+        // 修正していない項目だけ、実際に値が変わっていれば1回分として消費する」
+        // というロジックをここでも適用する（開発者ツール等での改ざん対策の多層防御）。
+        var orig = state.currentSession || {};
+        var normStr = function(v){ return String(v||'').trim(); };
+        var rawDraftValues = {
+          title: d.title.trim(), dateISO: d.dateISO||todayISO(),
+          purpose: normStr(d.purpose), location: normStr(d.location),
+          participants: normStr(d.participants), participantCount: normStr(d.participantCount),
+          industry: normStr(d.industry)
+        };
+        var origValues = {
+          title: normStr(orig.title), dateISO: normStr(orig.dateISO)||todayISO(),
+          purpose: normStr(orig.purpose), location: normStr(orig.location),
+          participants: normStr(orig.participants), participantCount: normStr(orig.participantCount),
+          industry: normStr(orig.industry)
+        };
+        var newEditedFields = Object.assign({}, orig.editedFields || {});
+        var fieldsToSave = {};
+        OVERVIEW_EDIT_ONCE_FIELDS.forEach(function(f){
+          if (newEditedFields[f]){
+            fieldsToSave[f] = origValues[f]; // すでに1回使い切っている＝元の値のまま
+          } else if (rawDraftValues[f] !== origValues[f]){
+            fieldsToSave[f] = rawDraftValues[f]; // 初めての変更＝反映して1回分を消費
+            newEditedFields[f] = true;
+          } else {
+            fieldsToSave[f] = origValues[f]; // 変更なし＝まだ1回分は残したまま
+          }
+        });
         await dbApi.doc('sessions/'+state.currentId).update({
-          title:d.title.trim(), dateISO:d.dateISO||todayISO(),
-          purpose:(d.purpose||'').trim(), location:(d.location||'').trim(), participants:(d.participants||'').trim(),
-          participantCount:(d.participantCount||'').trim(), industry:(d.industry||'').trim(),
+          title: fieldsToSave.title, dateISO: fieldsToSave.dateISO,
+          purpose: fieldsToSave.purpose, location: fieldsToSave.location, participants: fieldsToSave.participants,
+          participantCount: fieldsToSave.participantCount, industry: fieldsToSave.industry,
+          editedFields: newEditedFields,
           askAbout: d.askAbout !== false,
           groupJoinMode: getGroupJoinMode(d),
           updatedAt:new Date().toISOString()
@@ -2181,7 +2328,7 @@
 
       var delSessionBtn = document.getElementById('delete-session-btn');
       if (delSessionBtn) delSessionBtn.addEventListener('click', async function(){
-        var ok = await confirmModal('このフォルダと、その中のすべての記録・写真を削除します。QRコードも無効になります。よろしいですか？','フォルダを削除する');
+        var ok = await confirmModal('このワークショップと、その中のすべての記録・写真を削除します。QRコードも無効になります。よろしいですか？','ワークショップを削除する');
         if (ok) await deleteSession();
       });
     }
@@ -2339,6 +2486,24 @@
     );
   }
 
+  // ワークショップの「使い回し」対策（概要項目：1回のみ修正方式）:
+  // 概要の各項目（件名・日付・ねらい・場所・対象・人数・業界業種）は、
+  // それぞれ最初の1回だけ修正でき、一度修正するとその項目はそれ以降
+  // 変更できなくなる（項目ごとに独立してロックされる。まだ一度も修正
+  // していない項目は引き続き自由に直せる）。「記録が入ったら日付を
+  // 永久に変更不可にする」という以前の方式より緩やかにしつつ、概要を
+  // 何度も書き換えて1つのワークショップ作成枠を使い回すことを防ぐ。
+  var OVERVIEW_EDIT_ONCE_FIELDS = ['title','dateISO','purpose','location','participants','participantCount','industry'];
+  function isOverviewFieldLocked(fieldName){
+    return !!(state.currentSession && state.currentSession.editedFields && state.currentSession.editedFields[fieldName]);
+  }
+  function overviewFieldDisabledAttr(fieldName){
+    return isOverviewFieldLocked(fieldName) ? ' disabled title="この項目はすでに一度修正済みのため、これ以上変更できません"' : '';
+  }
+  function overviewFieldLockHint(fieldName){
+    return isOverviewFieldLocked(fieldName) ? '<p class="hint" style="margin:.15rem 0 .5rem; color:var(--ink-faint);">🔒 修正済み（この項目は最初の1回のみ修正できます）</p>' : '';
+  }
+
   function getFilteredEntries(){
     var entries = state.entries;
     if (state.groupFilter != null){
@@ -2360,6 +2525,21 @@
     return entries;
   }
 
+  function currentAccountIsMaster(){
+    return !!(state.authAccount && isMasterFacilitatorEmail(state.authAccount.email));
+  }
+  function currentWorkshopCount(){
+    if (!state.authAccount) return 0;
+    var myId = state.authAccount.id;
+    return (state.sessions||[]).filter(function(s){ return s.createdBy === myId; }).length;
+  }
+  function canCreateMoreWorkshops(){
+    if (currentAccountIsMaster()) return true;
+    var limit = state.authAccount && typeof state.authAccount.creationLimit === 'number' ? state.authAccount.creationLimit : null;
+    if (limit === null) return true; // 上限未設定（本来は追加時必須だが、念のため未設定なら無制限扱いにしない事故を避けるため許可）
+    return currentWorkshopCount() < limit;
+  }
+
   async function createSession(){
     var f = state.newForm;
     if (!f.title.trim()){ toast('件名を入力してください'); return; }
@@ -2375,7 +2555,7 @@
     debugLines.push('選択: グループ' + groupCount + ' / 問い' + sectionCount);
     try{
       var now = new Date().toISOString();
-      var sessionData = {title:f.title.trim(), dateISO: f.dateISO || todayISO(), purpose:(f.purpose||'').trim(), location:(f.location||'').trim(), participants:(f.participants||'').trim(), participantCount:(f.participantCount||'').trim(), industry:(f.industry||'').trim(), askAbout: f.askAbout !== false, groupJoinMode: getGroupJoinMode(f), createdAt:now, updatedAt:now};
+      var sessionData = {title:f.title.trim(), dateISO: f.dateISO || todayISO(), purpose:(f.purpose||'').trim(), location:(f.location||'').trim(), participants:(f.participants||'').trim(), participantCount:(f.participantCount||'').trim(), industry:(f.industry||'').trim(), askAbout: f.askAbout !== false, groupJoinMode: getGroupJoinMode(f), createdAt:now, updatedAt:now, createdBy: (state.authAccount && state.authAccount.id) || null};
       if (sectionCount > 0) sessionData.currentSectionIndex = 0;
       var ref = await addDoc('sessions', sessionData);
       debugLines.push('セッション作成: id=' + ref.id);
@@ -2428,7 +2608,7 @@
         debugLines.push('問い読み直し結果: ' + sectionCheck.docs.length + '/' + sectionCount + '件');
         preloadSections = sectionCheck.docs.map(function(d){ var data=Object.assign({}, d.data()||{}, {id:d.id}); return data; });
       }
-      toast('フォルダを作成しました');
+      toast('ワークショップを作成しました');
       // Seed the detail view directly from what we just confirmed via get()
       // instead of waiting on the live onSnapshot subscription for its first
       // delivery — that subscription has been observed to sometimes lag behind
@@ -2492,7 +2672,7 @@
       if (state.currentSession && state.currentSession.joinCode) await releaseJoinCode(state.currentSession.joinCode);
     }catch(e){ console.warn('session code cleanup failed', e); }
     await dbApi.doc('sessions/'+id).delete();
-    toast('フォルダを削除しました');
+    toast('ワークショップを削除しました');
     goSessions();
   }
 
@@ -2637,8 +2817,8 @@
     }
   }
 
-  // フォルダの概要情報（AIによる報告書の代わりに、生の集計値だけをCSVで
-  // 書き出す）。選択状態や記録の有無に関わらず、フォルダを開けばいつでも
+  // ワークショップの概要情報（AIによる報告書の代わりに、生の集計値だけをCSVで
+  // 書き出す）。選択状態や記録の有無に関わらず、ワークショップを開けばいつでも
   // 保存できる。
   async function generateOverviewCsvExport(){
     var s = state.currentSession || {};
@@ -2692,7 +2872,7 @@
 
       var csvText = rows.map(function(r){ return r.map(csvCell).join(','); }).join('\r\n');
       var stamp = (s.dateISO||todayISO()).replace(/[\\/:*?"<>|]/g,'');
-      await downloadsApi.save({filename: 'フォルダ概要_' + stamp + '.csv', data: '﻿' + csvText});
+      await downloadsApi.save({filename: 'ワークショップ概要_' + stamp + '.csv', data: '﻿' + csvText});
       setGen('overviewCsv', false, '✓ 保存しました', 'ok');
     }catch(err){
       console.error(err);
@@ -2725,7 +2905,7 @@
           var snap = await dbApi.doc('managerAccounts/'+storedId).get();
           if (snap.exists){
             var d = snap.data() || {};
-            state.authAccount = {id: storedId, email: d.email};
+            state.authAccount = {id: storedId, email: d.email, creationLimit: (typeof d.creationLimit === 'number' ? d.creationLimit : null)};
             state.authPhase = null;
             proceedAuthed();
             return;
@@ -2959,23 +3139,23 @@
       root.innerHTML = (
         '<section class="block">' +
           '<h2 style="margin-top:0;">参加コードで参加</h2>' +
-          '<p class="hint" style="margin-top:-.2rem;">マネジャーから伝えられた参加コードを入力すると、自分のグループ（またはフォルダ）の記録画面に直接移動できます。</p>' +
+          '<p class="hint" style="margin-top:-.2rem;">メインファシリテーターから伝えられた参加コードを入力すると、自分のグループ（またはワークショップ）の記録画面に直接移動できます。</p>' +
           '<div class="link-row">' +
             '<input type="text" id="join-code-input" placeholder="例: K3F9X" value="' + esc(state.codeInput||'') + '" maxlength="8" style="font-family:var(--font-mono); font-weight:700; letter-spacing:.12em; text-transform:uppercase;">' +
             '<button class="btn-sm primary" id="join-code-btn">参加する</button>' +
           '</div>' +
           (state.codeError ? '<p class="form-error" style="margin-top:.5rem;">' + esc(state.codeError) + '</p>' : '') +
         '</section>' +
-        (noCodeHint ? '<p class="hint" style="margin:0 0 .9rem;">コードをお持ちでない場合は、下から参加するワークショップのフォルダを選んでください。</p>' : '') +
+        (noCodeHint ? '<p class="hint" style="margin:0 0 .9rem;">コードをお持ちでない場合は、下から参加するワークショップを選んでください。</p>' : '') +
         (state.pickBusy ? '<p class="state-msg neutral">読み込んでいます…</p>' :
           (state.pickSessions.length ?
             state.pickSessions.map(function(s){
               return '<div class="pick-card" data-pick-session="' + esc(s.id) + '">' +
-                '<div class="info"><div class="date">' + esc(s.dateISO||'—') + '</div><h3>' + esc(s.title||'無題のフォルダ') + '</h3></div>' +
+                '<div class="info"><div class="date">' + esc(s.dateISO||'—') + '</div><h3>' + esc(s.title||'無題のワークショップ') + '</h3></div>' +
                 '<div class="arrow">›</div>' +
               '</div>';
             }).join('') :
-            '<p class="state-msg neutral">現在参加できるフォルダが見つかりません。マネジャーがフォルダを作成しているか確認してください。</p>'))
+            '<p class="state-msg neutral">現在参加できるワークショップが見つかりません。メインファシリテーターがワークショップを作成しているか確認してください。</p>'))
       );
       var joinCodeInput = document.getElementById('join-code-input');
       var joinCodeBtn = document.getElementById('join-code-btn');
@@ -2999,7 +3179,7 @@
         root.innerHTML = (
           '<section class="block">' +
             '<h2 style="margin-top:0;">参加コードで参加</h2>' +
-            '<p class="hint" style="margin-top:-.2rem;">このフォルダはグループごとの参加コードで参加します。マネジャーから伝えられた、自分のグループの参加コードを入力してください。</p>' +
+            '<p class="hint" style="margin-top:-.2rem;">このワークショップはグループごとの参加コードで参加します。メインファシリテーターから伝えられた、自分のグループの参加コードを入力してください。</p>' +
             '<div class="link-row">' +
               '<input type="text" id="group-code-input" placeholder="例: K3F9X" value="' + esc(state.groupCodeInput||'') + '" maxlength="8" style="font-family:var(--font-mono); font-weight:700; letter-spacing:.12em; text-transform:uppercase;">' +
               '<button class="btn-sm primary" id="group-code-btn">参加する</button>' +
@@ -3038,7 +3218,7 @@
     }
     if (state.phase === 'not-found'){
       bannerSlot.innerHTML = '';
-      root.innerHTML = '<p class="state-msg">指定されたフォルダが見つかりませんでした。マネジャーに新しいQRコードを発行してもらってください。</p>';
+      root.innerHTML = '<p class="state-msg">指定されたワークショップが見つかりませんでした。メインファシリテーターに新しいQRコードを発行してもらってください。</p>';
       return;
     }
 
@@ -3057,7 +3237,7 @@
     bannerSlot.innerHTML =
       '<div class="session-banner">' +
         '<div class="eyebrow">FOLDER</div>' +
-        '<h1>' + esc(s.title || '無題のフォルダ') + '</h1>' +
+        '<h1>' + esc(s.title || '無題のワークショップ') + '</h1>' +
         '<div class="date">' + esc(formatDateLabel(s.dateISO)) + '</div>' +
         (secName ? '<div class="section-badge">' +
           (activePhase==='before' ? esc(secName) + '（音声・写真のテストができます）' :
@@ -3120,7 +3300,7 @@
       '<div id="form-error"></div>' +
       '<button class="save-btn" id="save-btn">この記録を追加する</button>' +
 
-      '<div class="feed-title">このフォルダの記録 <span class="n">(' + state.entries.length + ')</span></div>' +
+      '<div class="feed-title">このワークショップの記録 <span class="n">(' + state.entries.length + ')</span></div>' +
       (state.entries.length ?
         state.entries.map(renderEntry).join('') :
         '<p class="feed-empty">まだ記録がありません。最初の記録を追加しましょう。</p>')
@@ -3156,7 +3336,7 @@
             '<input type="text" id="rf-name" placeholder="例: 山田太郎" value="' + esc(d.name) + '"></div>'
           : '') +
         (groupNumber ? '<p class="hint" style="margin-top:-.4rem;">所属グループ「' + esc(groupNumber) + '」として記録されます。</p>' : '') +
-        (!cfg.questions.length ? '<p class="hint">まだ設問が設定されていません。マネジャーにお問い合わせください。</p>' : '') +
+        (!cfg.questions.length ? '<p class="hint">まだ設問が設定されていません。メインファシリテーターにお問い合わせください。</p>' : '') +
         cfg.questions.map(function(q){ return reflectionQuestionFieldHtml(q, d.answers[q.id]); }).join('') +
         '<div id="rf-form-error"></div>' +
         '<button class="save-btn" id="rf-save-btn" ' + (!cfg.questions.length?'disabled':'') + '>回答を送信する</button>' +
@@ -3466,7 +3646,7 @@
         var sessionMeta = sSnap.exists ? sSnap.data() : null;
         if (getGroupJoinMode(sessionMeta) === 'list'){
           state.pickBusy = false;
-          state.codeError = 'このフォルダは、一覧からグループを選んで参加する方式です。フォルダを選び、グループの一覧から参加してください。';
+          state.codeError = 'このワークショップは、一覧からグループを選んで参加する方式です。ワークショップを選び、グループの一覧から参加してください。';
           render();
           return;
         }
@@ -3596,12 +3776,28 @@
       // the only clickable thing in the top-right corner.
       btn.textContent = 'グループ選択へ';
     } else {
-      btn.textContent = '管理者はこちら';
+      btn.textContent = '管理画面へ';
     }
   }
+  // ヘッダのブランドアイコン。メインファシリテーター側は元々の葉（Crop）アイコンのまま、
+  // 参加者側（ワークの記録を送信 Pop）は名称に合わせて「送信」を表す紙飛行機
+  // アイコンに切り替える。
+  var BRAND_ICON_MANAGER =
+    '<rect x="1" y="1" width="22" height="22" rx="7"></rect>' +
+    '<path class="stem" d="M12 19c0-3.2 0-6.6 0-9.8"></path>' +
+    '<path class="leaf" d="M12 13.6c-2.7 0.5-5.4-1-6.2-4.3 3-0.9 5.8 0.5 6.4 3.1 0.15 0.6 0.1 1-0.2 1.2z"></path>' +
+    '<path class="leaf" d="M12 10.6c2.6-0.4 4.8-2.4 5.1-5.6-2.8-0.4-5.1 1.3-5.5 3.8-0.1 0.6-0.05 1.2 0.4 1.8z"></path>';
+  var BRAND_ICON_PARTICIPANT =
+    '<rect x="1" y="1" width="22" height="22" rx="7"></rect>' +
+    '<path class="send" d="M4.5 5 L20 12 L4.5 19 L8 12 Z"></path>';
   function applyModeChrome(){
-    document.getElementById('brand-mark').textContent = mode === 'manager' ? 'ワークショップ記録帳 Crop' : '参加者からの記録送信 Pop';
-    document.getElementById('brand-sub').textContent = mode === 'manager' ? 'MANAGER' : 'RECORD ENTRY';
+    document.getElementById('brand-mark').textContent = mode === 'manager' ? 'ワークショップ記録帳 Crop' : 'ワークの記録を送信 Pop';
+    document.getElementById('brand-sub').textContent = mode === 'manager' ? 'FACILI' : 'RECORD ENTRY';
+    var brandIcon = document.getElementById('brand-icon');
+    if (brandIcon){
+      brandIcon.innerHTML = mode === 'manager' ? BRAND_ICON_MANAGER : BRAND_ICON_PARTICIPANT;
+      brandIcon.classList.toggle('mode-participant', mode !== 'manager');
+    }
     document.getElementById('app-root').className = 'app' + (mode === 'participant' ? ' p-mode' : '');
     document.getElementById('db-warn-slot').innerHTML = '';
     document.getElementById('banner-slot').innerHTML = '';
