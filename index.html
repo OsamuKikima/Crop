@@ -3213,6 +3213,7 @@
     pickGroups: [],    // for phase 'pick-group'
     pickSessionMeta: null, // the chosen folder's own doc data, fetched alongside pickGroups — needed to read its groupJoinMode
     pickBusy: false,
+    pickSlowHint: false, // set true if a pickBusy lookup is still running after a couple seconds — see scheduleSlowHint()
     codeInput: '',     // for phase 'pick-session' — the join-code entry field
     codeError: null,
     groupCodeInput: '', // for phase 'pick-group' in groupJoinMode:'code' — the embedded group-code entry field
@@ -3317,10 +3318,13 @@
           '<h2 style="margin-top:0;">参加コードで参加</h2>' +
           '<p class="hint" style="margin-top:-.2rem;">メインファシリテーターから伝えられた参加コードを入力すると、自分のグループ（またはワークショップ）の記録画面に直接移動できます。</p>' +
           '<div class="link-row">' +
-            '<input type="text" id="join-code-input" placeholder="例: K3F9X" value="' + esc(state.codeInput||'') + '" maxlength="8" style="font-family:var(--font-mono); font-weight:700; letter-spacing:.12em; text-transform:uppercase;">' +
-            '<button class="btn-sm primary" id="join-code-btn">参加する</button>' +
+            '<input type="text" id="join-code-input" placeholder="例: K3F9X" value="' + esc(state.codeInput||'') + '" maxlength="8" style="font-family:var(--font-mono); font-weight:700; letter-spacing:.12em; text-transform:uppercase;"' + (state.pickBusy?' disabled':'') + '>' +
+            '<button class="btn-sm primary" id="join-code-btn"' + (state.pickBusy?' disabled':'') + '>' +
+              (state.pickBusy ? '<span class="spin"></span> 確認しています…' : '参加する') +
+            '</button>' +
           '</div>' +
           (state.codeError ? '<p class="form-error" style="margin-top:.5rem;">' + esc(state.codeError) + '</p>' : '') +
+          (state.pickSlowHint ? '<p class="hint" style="margin-top:.5rem;">通信状況により少し時間がかかっています。そのままお待ちください…</p>' : '') +
         '</section>' +
         (noCodeHint ? '<p class="hint" style="margin:0 0 .9rem;">コードをお持ちでない場合は、下から参加するワークショップを選んでください。</p>' : '') +
         (state.pickBusy ? '<p class="state-msg neutral">読み込んでいます…</p>' :
@@ -3348,19 +3352,28 @@
     if (state.phase === 'pick-group'){
       bannerSlot.innerHTML = '';
       var groupJoinMode = getGroupJoinMode(state.pickSessionMeta);
-      if (!state.pickBusy && groupJoinMode === 'code'){
+      if (groupJoinMode === 'code'){
         // The admin restricted this folder to code-only group entry — no
         // list of groups is shown at all, just an embedded code box scoped
         // to this same folder (choosePickedSession() already fetched it).
+        // Note: this box stays mounted even while state.pickBusy is true
+        // (submitGroupCode()'s own lookup in flight) — it used to be
+        // conditioned on `!state.pickBusy` and would vanish entirely the
+        // moment someone tapped 参加する, replaced by an unrelated loading
+        // screen, which read as the tap having done something wrong. It
+        // now just disables itself and shows a spinner in place instead.
         root.innerHTML = (
           '<section class="block">' +
             '<h2 style="margin-top:0;">参加コードで参加</h2>' +
             '<p class="hint" style="margin-top:-.2rem;">このワークショップはグループごとの参加コードで参加します。メインファシリテーターから伝えられた、自分のグループの参加コードを入力してください。</p>' +
             '<div class="link-row">' +
-              '<input type="text" id="group-code-input" placeholder="例: K3F9X" value="' + esc(state.groupCodeInput||'') + '" maxlength="8" style="font-family:var(--font-mono); font-weight:700; letter-spacing:.12em; text-transform:uppercase;">' +
-              '<button class="btn-sm primary" id="group-code-btn">参加する</button>' +
+              '<input type="text" id="group-code-input" placeholder="例: K3F9X" value="' + esc(state.groupCodeInput||'') + '" maxlength="8" style="font-family:var(--font-mono); font-weight:700; letter-spacing:.12em; text-transform:uppercase;"' + (state.pickBusy?' disabled':'') + '>' +
+              '<button class="btn-sm primary" id="group-code-btn"' + (state.pickBusy?' disabled':'') + '>' +
+                (state.pickBusy ? '<span class="spin"></span> 確認しています…' : '参加する') +
+              '</button>' +
             '</div>' +
             (state.groupCodeError ? '<p class="form-error" style="margin-top:.5rem;">' + esc(state.groupCodeError) + '</p>' : '') +
+            (state.pickSlowHint ? '<p class="hint" style="margin-top:.5rem;">通信状況により少し時間がかかっています。そのままお待ちください…</p>' : '') +
           '</section>'
         );
         var groupCodeInput = document.getElementById('group-code-input');
@@ -3715,16 +3728,42 @@
   ============================================================ */
   var __pickedSessionId = null;
 
+  // pickBusy alone (a plain boolean) told the UI whether to disable/spinner
+  // its button, but gave no signal about *how long* a lookup was taking —
+  // on a slow or congested venue Wi-Fi, several silent seconds after
+  // tapping "参加する" reads as "did that even register?" and makes
+  // participants anxious enough to tap again. scheduleSlowHint() starts a
+  // short timer alongside pickBusy; if the lookup is still running once it
+  // fires, state.pickSlowHint flips on and the UI adds a reassuring "this
+  // is taking a moment, please wait" line without the participant having
+  // to guess whether anything is happening. clearSlowHint() cancels it the
+  // instant the lookup actually finishes, so a fast response never shows it.
+  var __pickBusyTimer = null;
+  function scheduleSlowHint(){
+    clearTimeout(__pickBusyTimer);
+    state.pickSlowHint = false;
+    __pickBusyTimer = setTimeout(function(){
+      state.pickSlowHint = true;
+      render();
+    }, 2500);
+  }
+  function clearSlowHint(){
+    clearTimeout(__pickBusyTimer);
+    state.pickSlowHint = false;
+  }
+
   async function startSessionPicker(){
     state.phase = 'pick-session';
     state.pickBusy = true;
     state.pickSessions = [];
+    scheduleSlowHint();
     render();
     try{
       var qs = await dbApi.collection('sessions').orderBy('dateISO','desc').limit(50).get();
       state.pickSessions = qs.docs.map(function(d){ return Object.assign({}, d.data()||{}, {id:d.id}); });
     }catch(e){ console.warn('sessions list failed', e); }
     state.pickBusy = false;
+    clearSlowHint();
     render();
   }
 
@@ -3736,6 +3775,7 @@
     state.pickSessionMeta = null;
     state.groupCodeInput = '';
     state.groupCodeError = null;
+    scheduleSlowHint();
     render();
     try{
       // Fetch the folder's own doc alongside its groups — needed to read
@@ -3749,6 +3789,7 @@
       state.pickGroups = qs.docs.map(function(d){ return Object.assign({}, d.data()||{}, {id:d.id}); });
     }catch(e){ console.warn('groups list failed', e); }
     state.pickBusy = false;
+    clearSlowHint();
     if (!state.pickGroups.length){
       // No groups configured for this folder — nothing to choose, go
       // straight to the entry form.
@@ -3763,13 +3804,16 @@
   // below, but scoped to the folder already chosen (__pickedSessionId) and
   // requiring the resolved code to actually be a group-level code for it.
   async function submitGroupCode(){
+    if (state.pickBusy) return; // guards against a double-tap or an Enter-key repeat firing a second lookup mid-flight
     var raw = (state.groupCodeInput||'').trim();
     if (!raw){ state.groupCodeError = 'コードを入力してください。'; render(); return; }
     state.groupCodeError = null;
     state.pickBusy = true;
+    scheduleSlowHint();
     render();
     var resolved = await resolveJoinCode(raw);
     state.pickBusy = false;
+    clearSlowHint();
     if (!resolved || !resolved.groupId || resolved.sessionId !== __pickedSessionId){
       state.groupCodeError = 'そのコードは見つかりませんでした。入力内容をご確認ください。';
       render();
@@ -3801,14 +3845,17 @@
   // addDoc/ensureCount): resolves the code to a {sessionId, groupId} pair
   // via a single flat-collection lookup and jumps straight to that page.
   async function submitJoinCode(){
+    if (state.pickBusy) return; // guards against a double-tap or an Enter-key repeat firing a second lookup mid-flight
     var raw = (state.codeInput||'').trim();
     if (!raw){ state.codeError = 'コードを入力してください。'; render(); return; }
     state.codeError = null;
     state.pickBusy = true;
+    scheduleSlowHint();
     render();
     var resolved = await resolveJoinCode(raw);
     if (!resolved){
       state.pickBusy = false;
+      clearSlowHint();
       state.codeError = 'そのコードは見つかりませんでした。入力内容をご確認ください。';
       render();
       return;
@@ -3822,6 +3869,7 @@
         var sessionMeta = sSnap.exists ? sSnap.data() : null;
         if (getGroupJoinMode(sessionMeta) === 'list'){
           state.pickBusy = false;
+          clearSlowHint();
           state.codeError = 'このワークショップは、一覧からグループを選んで参加する方式です。ワークショップを選び、グループの一覧から参加してください。';
           render();
           return;
@@ -3833,6 +3881,7 @@
     // whichever group this code actually resolves to.
     if (resolved.groupId) state.draft.groupNumber = '';
     state.pickBusy = false;
+    clearSlowHint();
     enterReady(resolved.sessionId, resolved.groupId || null);
   }
 
